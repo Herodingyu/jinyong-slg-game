@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>金庸群侠大战 · 序章「破庙残谱」</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="topbar">
+  <span id="title">金庸群侠大战 · 序章「破庙残谱」</span>
+  <span id="turnInfo">第 1 回合 · 我方行动</span>
+  <button id="endTurn">结束回合</button>
+  <button id="fxBtn">演出:开</button>
+  <button id="bgmBtn">音乐:开</button>
+  <button id="helpBtn">说明</button>
+</div>
+<div id="main">
+  <canvas id="cv" width="896" height="640"></canvas>
+  <div id="side">
+    <div id="unitInfo" class="panel">点击我方单位查看信息</div>
+    <div id="actionMenu" class="panel hidden"></div>
+    <div id="log" class="panel"></div>
+  </div>
+</div>
+<div id="forecast" class="modal hidden">
+  <div class="mbox">
+    <h3 id="fTitle">选择武功</h3>
+    <div id="fList"></div>
+    <div class="mrow"><button id="fCancel">取消</button></div>
+  </div>
+</div>
+<div id="banner" class="hidden"></div>
+<div id="intro" class="modal">
+  <div class="mbox wide">
+    <h3>序章 · 破庙残谱</h3>
+    <p>雨夜，破庙，半页从天而降的残谱。同夜，江南小镇坠入了不该属于这个时代的城墙与飞雪。</p>
+    <p>辽兵在镇上肆虐——<b>但这个世界，没有辽。</b></p>
+    <p class="dim">目标：击破恶僧 <b>段延庆</b>（据守东北雪地）。<br>
+    韦小宝可对残血的<b>辽将</b>使用「说得」收服。<br>
+    萧峰与郭靖相邻、气势≥120 时可发动合体技「双侠镇襄阳」。</p>
+    <div class="mrow"><button id="startBtn">踏入江湖</button></div>
+  </div>
+</div>
+<script src="js/data.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
