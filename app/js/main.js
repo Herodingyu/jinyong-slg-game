@@ -21,6 +21,7 @@ const FX = { portrait: null, bigText: '', bigCrit: false,
              cutinT0: 0, cutinUntil: 0, flashT0: 0, flashUntil: 0, shakeUntil: 0,
              miniOn: false,   // 攻击事件期间战场缩略图置底模式
              hpAnim: null,    // HP逐格递减 {u,from,to,t0,per,crit}
+             ringFx: null,    // P1-6: 运功角色色环 {x,y,color,t0,until}
              floats: [] };    // 伤害飘字(由draw统一渲染)
 
 // ============ B2: 机战式横版战斗场景 ============
@@ -30,6 +31,7 @@ const FT = { enter: 360, charge: 700, strike: 1030, hit: 1500, out: 1740 }; // �
 const FIGHT = { active: false, ev: null, t0: 0, crit: false, isMiss: false, sparks: [],
                 attImg: null, defImg: null, attIsPortrait: false, defIsPortrait: false,
                 weaponName: '', animKind: 'dash', animColor: '#ffb84a', durOut: FT.out,
+                killAt: 0,       // P1-5: HP归零时刻(相对t0), 击破定格+台词时间轴锚点
                 gunX: 0, gunY: 0 };
 
 // 窗口进度: p 在 [a,b] 间的归一化位置(0→1)
@@ -68,20 +70,29 @@ function startFight(ev) {
   FIGHT.attImg = FIGHT.attIsPortrait ? ap : sprites[ev.att.sprite];
   FIGHT.defImg = FIGHT.defIsPortrait ? dp : sprites[ev.def.sprite];
   if (FIGHT.isMiss) { // 落空: 守方不扣血, 无爆闪无震屏
+    FIGHT.killAt = 0;
     FX.hpAnim = null;
     FX.flashT0 = FX.flashUntil = FX.shakeUntil = 0;
   } else {
     const from = Math.min(ev.def.maxhp, ev.def.hp + ev.dmg);
     const seg = Math.max(1, Math.round(ev.def.maxhp / 10));
+    const per = FIGHT.crit ? 26 : 40;
     FX.hpAnim = { u: ev.def, from, to: ev.def.hp,
                   t0: now + FT.strike + (FIGHT.crit ? 120 : 0),
-                  per: FIGHT.crit ? 26 : 40, seg, crit: FIGHT.crit };
+                  per, seg, crit: FIGHT.crit };
     FX.flashT0 = now + FT.strike; FX.flashUntil = now + FT.strike + (FIGHT.crit ? 380 : 260);
     FX.shakeUntil = now + FT.strike + 500;
+    if (ev.killed) {
+      // P1-5: 击破情绪峰值 — HP归零瞬间白闪定格~500ms, 再接攻方胜利台词(motto)大字
+      const zeroTicks = Math.ceil(from / seg);          // 逐格归零所需格数
+      FIGHT.killAt = FT.strike + (FIGHT.crit ? 120 : 0) + zeroTicks * per;
+      FIGHT.durOut = FIGHT.killAt + 500 + 980;          // 定格500ms + 台词停留~1s
+    } else FIGHT.killAt = 0;
   }
 }
 function endFight() {
   FIGHT.active = false; FIGHT.ev = null; FIGHT.sparks = [];
+  FIGHT.killAt = 0;
   FX.hpAnim = null;
 }
 
@@ -266,21 +277,51 @@ function draw() {
       ctx.fillStyle = 'rgba(255,255,255,' + Math.max(0, a).toFixed(3) + ')';
       ctx.fillRect(0, 0, cv.width, cv.height);
     }
-    if (FX.portrait && FX.portrait.complete && now < FX.cutinUntil) {
+    // P0-1/P1-6: 立绘切入+书法大字; 无立绘角色大字居中(台词/运功通用)
+    if (now < FX.cutinUntil && FX.bigText) {
       const im = FX.portrait;
-      const ph = cv.height * 0.78, pw = ph * im.width / im.height;
-      const slide = Math.min(1, (now - FX.cutinT0) / 220); // 220ms滑入
-      const px = -pw + (14 + pw) * slide;
-      ctx.drawImage(im, px, cv.height - ph - 8, pw, ph);
-      // 大字: 白芯深红描边, 立绘右侧
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const hasIm = im && im.complete;
+      let tx;
+      if (hasIm) {
+        const ph = cv.height * 0.78, pw = ph * im.width / im.height;
+        const slide = Math.min(1, (now - FX.cutinT0) / 220); // 220ms滑入
+        const px = -pw + (14 + pw) * slide;
+        ctx.drawImage(im, px, cv.height - ph - 8, pw, ph);
+        tx = Math.max(px + pw - 40, cv.width * 0.38);
+        ctx.textAlign = 'left';
+      } else {
+        tx = cv.width * 0.5; // 无立绘: 大字居中
+        ctx.textAlign = 'center';
+      }
+      ctx.textBaseline = 'middle';
       ctx.font = 'bold 68px "KaiTi","STKaiti","Microsoft YaHei",serif';
-      const tx = Math.max(px + pw - 40, cv.width * 0.38), ty = cv.height * 0.4;
+      const ty = cv.height * 0.4;
       ctx.lineWidth = 10; ctx.strokeStyle = FX.bigCrit ? '#7a1010' : '#26203a';
       ctx.strokeText(FX.bigText, tx, ty);
       ctx.fillStyle = FX.bigCrit ? '#ffd24a' : '#fff8e0';
       ctx.fillText(FX.bigText, tx, ty);
       ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
+    }
+    // P1-6: 运功角色色环 — 画在覆盖层最上(不被立绘切入遮住, 角色色扩散反馈必须被看见)
+    if (FX.ringFx && now < FX.ringFx.until) {
+      const r = FX.ringFx, rp = win(now, r.t0, r.until);
+      const cx = r.x * TS + TS / 2, cy = r.y * TS + TS / 2;
+      ctx.save();
+      // 双环外扩(外环粗亮, 内环补韵)
+      const rad = 18 + rp * 48;
+      ctx.globalAlpha = (1 - rp);
+      ctx.strokeStyle = r.color; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.ellipse(cx, cy, rad, rad * 0.55, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = (1 - rp) * 0.6;
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(cx, cy, rad * 0.62, rad * 0.62 * 0.55, 0, 0, Math.PI * 2); ctx.stroke();
+      // 角色色溢光
+      const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, TS * 0.85);
+      rg.addColorStop(0, r.color); rg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = (1 - rp) * 0.5;
+      ctx.fillStyle = rg;
+      ctx.fillRect(cx - TS, cy - TS, TS * 2, TS * 2);
+      ctx.restore();
     }
     // B1 机战式大HP条: 演出中以粗条逐格扣血(缩略图里的小条同步递减)
     if (FX.hpAnim && now >= FX.hpAnim.t0) {
@@ -310,12 +351,16 @@ function draw() {
 }
 
 // ============ B2: 战斗场景渲染(FIGHT.active 期间由 draw 调) ============
-function drawFightScene(now) {
+function drawFightScene(nowReal) {
   const ev = FIGHT.ev;
   if (!ev) return;
-  const p = now - FIGHT.t0;
+  const p = nowReal - FIGHT.t0;
   const crit = FIGHT.crit;
   const tStrike = FT.strike + (crit ? 120 : 0);
+  const killAt = FIGHT.killAt || 0;
+  // P1-5: 击破定格 — 定格窗口内全场景时间冻结(火花悬停/立绘定住), 只有白闪在衰减
+  const now = (ev.killed && p >= killAt && p < killAt + 500)
+    ? FIGHT.t0 + killAt : nowReal;
   const outA = 1 - win(p, FIGHT.durOut - 200, FIGHT.durOut); // 收势淡出
   const CW = cv.width, CH = cv.height;
 
@@ -483,21 +528,45 @@ function drawFightScene(now) {
   // --- 底部 HP 条(双方, 机战样式) ---
   drawFightHpBar(ev.att, CW * 0.06, CH - 96, false);
   drawFightHpBar(ev.def, CW * 0.54, CH - 96, true);
-
-  // 击破大字(与伤害字错峰)
-  if (ev.killed && p > tStrike + 520) {
-    const kp = win(p, tStrike + 520, tStrike + 1300);
-    ctx.save();
-    ctx.globalAlpha = (1 - kp * kp) * outA;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = 'bold ' + Math.round(58 + kp * 46) + 'px KaiTi,STKaiti,serif';
-    ctx.lineWidth = 12; ctx.strokeStyle = '#4a2a08';
-    ctx.strokeText(ev.def.cn + ' 击破!', CW / 2, CH * 0.40);
-    ctx.fillStyle = '#ffd24a';
-    ctx.fillText(ev.def.cn + ' 击破!', CW / 2, CH * 0.40);
-    ctx.restore();
-  }
   ctx.restore();
+
+  // ==== P1-5: 击破情绪峰值(白闪定格 → 击破大字 → 攻方胜利台词) ====
+  if (ev.killed) {
+    // 定格白闪: HP归零瞬间全屏白闪, 500ms 内衰减但不消失(机战撃破闪光)
+    if (p >= killAt && p < killAt + 500) {
+      const fa = 1 - (p - killAt) / 500;
+      ctx.fillStyle = 'rgba(255,252,240,' + (0.30 + 0.58 * fa).toFixed(3) + ')';
+      ctx.fillRect(0, 0, CW, CH);
+    }
+    // 击破大字 + motto 台词(定格后错峰入场, 台词停留到收势)
+    if (p >= killAt + 500) {
+      const kp = win(p, killAt + 500, killAt + 960);
+      const mp = win(p, killAt + 640, killAt + 1060);
+      ctx.save();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      // 击破大字(金, 爆发出现在上屏)
+      ctx.globalAlpha = (1 - kp * kp) * outA;
+      ctx.font = 'bold ' + Math.round(52 + kp * 40) + 'px KaiTi,STKaiti,serif';
+      ctx.lineWidth = 12; ctx.strokeStyle = '#4a2a08';
+      ctx.strokeText(ev.def.cn + ' 击破!', CW / 2, CH * 0.28);
+      ctx.fillStyle = '#ffd24a';
+      ctx.fillText(ev.def.cn + ' 击破!', CW / 2, CH * 0.28);
+      // 攻方胜利台词(白芯深描边, SRW 击破后胜利姿势配台词)
+      const msize = Math.round(30 + 14 * (1 - Math.pow(1 - Math.min(1, mp * 1.6), 3)));
+      const my = CH * 0.47;
+      // 台词衬底暗带, 保证任何背景可读
+      ctx.globalAlpha = Math.min(1, mp * 2.2) * 0.55 * outA;
+      ctx.fillStyle = '#0a0812';
+      ctx.fillRect(CW * 0.08, my - 34, CW * 0.84, 68);
+      ctx.globalAlpha = Math.min(1, mp * 2.2) * outA;
+      ctx.font = 'bold ' + msize + 'px KaiTi,STKaiti,"Microsoft YaHei",serif';
+      ctx.lineWidth = 9; ctx.strokeStyle = '#2a0a08';
+      ctx.strokeText(ev.att.motto, CW / 2, my);
+      ctx.fillStyle = '#fff8e0';
+      ctx.fillText(ev.att.motto, CW / 2, my);
+      ctx.restore();
+    }
+  }
 }
 
 // 战斗场景 HP 条(左攻右守, 守方条同步逐格动画)
@@ -697,14 +766,23 @@ function log(msg) {
   logBox.prepend(p);
   while (logBox.children.length > 60) logBox.lastChild.remove();
 }
+// P0-4: 选中面板立绘头像(SRW/FE 铁律: 选中必带脸)
+// 有立绘用 portraits/ 原画; 无立绘角色(主角/辽兵/辽将)放大单位 sprite 回退, 像素风保留
 function showInfo(u) {
   if (!u) { unitInfo.innerHTML = '点击我方单位查看信息'; return; }
   const wp = u.weapons.map(wid => WEAPONS[wid].name).join('、');
+  const pim = portraits[u.sprite];
+  const hasP = pim && pim.complete && pim.naturalWidth > 0;
+  const border = u.boss ? '#c04030' : (u.side === 'player' ? '#4a6a9a' : '#9a4a3a');
   unitInfo.innerHTML =
-    `<b>${u.cn}</b> ${u.boss ? '·BOSS' : ''}<br>` +
+    `<div style="display:flex;gap:8px;align-items:flex-start">` +
+    `<img src="assets/${hasP ? 'portraits' : 'units'}/${u.sprite}.png" ` +
+    `style="width:76px;height:76px;flex:none;object-fit:contain;background:#14141c;` +
+    `border:2px solid ${border};image-rendering:${hasP ? 'auto' : 'pixelated'}">` +
+    `<div style="flex:1;min-width:0"><b>${u.cn}</b>${u.boss ? ' <span style="color:#ff7050">·BOSS</span>' : ''}<br>` +
     `HP ${u.hp}/${u.maxhp} ｜ 真气 ${u.sp}/${u.maxsp} ｜ 气势 <b style="color:#e8c85a">${u.will}</b><br>` +
     `膂力${u.atk} 根骨${u.def} 命中${u.hit} 闪避${u.evd} 轻功${u.mov}<br>` +
-    `武功: ${wp}`;
+    `武功: ${wp}</div></div>`;
 }
 
 function banner(text, ms) {
@@ -806,7 +884,7 @@ function openSpiritMenu(u) {
     return {
       name: `${s.name} <span class="dim">耗真气${s.cost}</span>`,
       sub: s.desc + (u.sp < s.cost ? '（真气不足）' : ''),
-      fn: () => {
+      fn: async () => {
         if (u.sp < s.cost) { log('真气不足'); openMenu(u); return; }
         u.sp -= s.cost;
         if (s.fx === 'willUp') {
@@ -818,6 +896,7 @@ function openSpiritMenu(u) {
           u.buffs[s.fx] = true;
           log(`${u.cn}运功【${s.name}】:${s.desc}`);
         }
+        await spiritFx(u, s); // P1-6: 运功演出(大字+色环+头顶小字), 再结束行动
         finishUnit(u, true);
       }
     };
@@ -892,13 +971,33 @@ async function animateEvent(ev, skipMotif) {
   floatText(ev.def, '-' + ev.dmg + (ev.isCrit ? '!' : ''), ev.isCrit ? '#ff5040' : '#ffe070');
   log(`${ev.att.cn} 的【${ev.w.name}】命中 ${ev.def.cn}，造成 <b>${ev.dmg}</b>${ev.isCrit ? ' 会心!' : ''}伤害` +
       (ev.killed ? `，<span style="color:#ff9070">击破！</span>` : ''));
-  if (ev.killed) { banner(ev.def.cn + ' 击破！', 800); playMotif(ev.att); }
+  if (ev.killed) { if (!fxOn) banner(ev.def.cn + ' 击破！', 800); playMotif(ev.att); } // P1-5: 演出开时击破峰值在FIGHT内(定格+台词), 不再重复banner
   checkEnd();
 }
 
 // 伤害飘字: B1起改由draw()统一渲染(旧setInterval直画在缩略图模式下会错位)
 function floatText(u, text, color) {
   FX.floats.push({ x: u.x, y: u.y, text, color, t0: performance.now() });
+}
+
+// P1-6: 运功演出配色(表现层配置, 与 MOTIF 同级)
+const SPIRIT_COLOR = { mustHit:'#6cf0ff', dmg2:'#ff6050', evade:'#8fd08f',
+                       halfDmg:'#e8c85a', willUp:'#d0a0ff', capture:'#c89aff', mov3:'#7fd0ff' };
+function seSpirit() { beep(392, .1, 'sine', .06); setTimeout(() => beep(523, .12, 'sine', .06), 90); setTimeout(() => beep(659, .16, 'sine', .05), 180); }
+// 运功演出: buff名大字(立绘切入, 无立绘居中出字)+角色色光环+头顶小字
+async function spiritFx(u, s) {
+  if (!fxOn) return;
+  const now = performance.now();
+  const color = SPIRIT_COLOR[s.fx] || '#9ad0ff';
+  const pim = portraits[u.sprite];
+  FX.portrait = (pim && pim.complete && pim.naturalWidth > 0) ? pim : null;
+  FX.bigText = s.name + '！';
+  FX.bigCrit = (s.fx === 'dmg2' || s.fx === 'mustHit'); // 进攻型运功给金字待遇
+  FX.cutinT0 = now; FX.cutinUntil = now + 840;
+  FX.ringFx = { x: u.x, y: u.y, color, t0: now, until: now + 640 };
+  FX.floats.push({ x: u.x, y: u.y, text: '【' + s.name + '】', color, t0: now });
+  seSpirit();
+  await sleep(840);
 }
 
 function finishUnit(u, keepMenuOpen) {
@@ -963,6 +1062,7 @@ async function enemyPhase() {
         u.sp -= s.cost;
         u.buffs[s.fx] = true;
         log(`${u.cn} 运功【${s.name}】:${s.desc}`);
+        await spiritFx(u, s); // P1-6: 敌方运功同样给演出(AI 的努力要让玩家看见)
       }
       const ev = resolveAttack(u, plan.target, WEAPONS[plan.wid]);
       await animateEvent(ev);

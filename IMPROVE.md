@@ -10,13 +10,13 @@
 - [x] **P0-1 miss/闪避演出** ✅ 2026-10-19（证据 /tmp/p0_miss_dodge.jpg，commit 021ea14）
 - [x] **P0-2 敌方回合反击自动化**：敌方攻击我方时不再弹 modal 冻结流程；按设定自动决策（默认最优反击，可被「演出开关」旁新增「手动反击」开关切回）。「取消」按钮语义一并理清。 ✅ 2026-10-19（附带修复：手动模式点「取消」Promise 永不 resolve 的卡死 bug；证据 /tmp/p0_enemy.jpg）
 - [x] **P0-3 悬停地形信息**：鼠标悬停格子，右侧面板显示地形名/回避/防御/移动成本（数据从 TERRAIN 读，FE 式）。 ✅ 2026-10-19（证据 /tmp/p0_enemy.jpg 右侧面板）
-- [ ] **P0-4 选中面板立绘头像**：showInfo 时显示 portraits/ 头像（无立绘角色用 sprite 放大回退）。
+- [x] **P0-4 选中面板立绘头像**：showInfo 时显示 portraits/ 头像（无立绘角色用 sprite 放大回退）。✅ 2026-10-20（证据 /tmp/fday2/after_p04_xiaofeng.jpg · after_p04_liaobing.jpg）
 
 ## P1 · 演出补齐
 
-- [ ] **P0-4 选中面板立绘头像**：showInfo 时显示 portraits/ 头像（无立绘角色用 sprite 放大回退）。
-- [ ] **P1-5 击破定格+台词**：FIGHT 内 ev.killed 时白闪定格 ~500ms + 攻方 motto 大字（data.js 已备 motto 字段）。
-- [ ] **P1-6 运功演出**：发动时「凝神！」「热血！」等 buff 名大字+角色色闪，地图单位头顶小字。
+- [x] **P0-4 选中面板立绘头像**：showInfo 时显示 portraits/ 头像（无立绘角色用 sprite 放大回退）。✅ 2026-10-20（同上）
+- [x] **P1-5 击破定格+台词**：FIGHT 内 ev.killed 时白闪定格 ~500ms + 攻方 motto 大字（data.js 已备 motto 字段）。✅ 2026-10-20（白闪定格500ms→击破金字→攻方胜利台词错峰入场；证据 /tmp/fday2/after_p15_freeze.jpg · text.jpg · text2.jpg）
+- [x] **P1-6 运功演出**：发动时「凝神！」「热血！」等 buff 名大字+角色色闪，地图单位头顶小字。✅ 2026-10-20（立绘cutin复用/无立绘大字居中/角色色双扩散环覆盖层置顶/头顶小字；证据 /tmp/fday2/ring_150.jpg · after_p16_spirit_hero.jpg · after_p16_enemy.jpg）
 - [ ] **P1-7 合体技双立绘同框**：萧左郭右同时入画、组合技大字、双动机接力。
 - [ ] **P1-8 开场镜头调度**：开场横幅后镜头扫场（或敌我位置脉冲高亮一圈），让玩家第一眼定位。
 - [ ] **P1-9 战斗立绘"人带招"**（机战A标杆·丁工指定）：出招攻方立绘前倾 rotate+收招过冲回弹；守方受击后仰角度回弹+crit 颤动双影；待机呼吸加强按轻功差异化。改前改后截图对比，详见 references/srw-a-battle-benchmark.md。
@@ -42,3 +42,4 @@
 | 日期 | 完成项 | 证据 |
 |------|--------|------|
 | 2026-10-19 | P0-1 miss演出 / P0-2 反击自动化+卡死修复 / P0-3 悬停地形；立 AUDIT+IMPROVE 机制，每日 cron(01:17)；机战A标杆调研(references/srw-a-battle-benchmark.md)；闭环铁律入任务书（测试/修改/看效果/再测试/再修改） | /tmp/p0_miss_dodge.jpg · /tmp/p0_enemy.jpg · commit 021ea14 |
+| 2026-10-20 | P0-4 选中立绘头像 / P1-5 击破定格+台词 / P1-6 运功演出；test_fx_b1 修复(B2重写后 miniOn 断言脱节→改验 FIGHT 生命周期)；击破时间轴探针校正(killAt=zeroTicks*per 真值)；环挪覆盖层防立绘遮挡 | /tmp/fday2/*.jpg · test 17/17 · commit 见报告 |
