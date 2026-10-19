@@ -37,3 +37,7 @@ cd app && python3 -m http.server 8000   # 打开 http://localhost:8000
 
 ## 提交规范
 每次完成一个任务: 更新本文件的勾选框, 并在 git commit message 里写清"做了什么+为什么"。
+
+## 每日改进（F阶段，2026-10-19 起）
+- [x] F-Day1 P0×3: miss进FIGHT(侧闪+闪避大字/不扣血) + 反击自动化(AUTO_COUNTER,修复modal卡死bug) + 悬停地形情报(TERRAIN读数,FE式)
+- [ ] F-Day2 队首: P0-4 选中面板立绘头像 → P1-5 击破定格+motto → P1-6 运功演出
