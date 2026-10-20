@@ -37,16 +37,98 @@ const FIGHT = { active: false, ev: null, t0: 0, crit: false, isMiss: false, spar
 // 窗口进度: p 在 [a,b] 间的归一化位置(0→1)
 function win(p, a, b) { return Math.max(0, Math.min(1, (p - a) / (b - a))); }
 
-// 立绘站位绘制(支持镜像与透明度); 无立绘角色外部传 sprite 图并标 isPortrait=false
-function drawStand(im, x, y, h, mirror, alpha, bob) {
+// ============ P1-9: 立绘 puppet 分层动画(伪骨骼) ============
+// 丁工 10-20 点名"人物不会动": 机战A 是逐帧动作, 零新素材下把立绘按头/躯干/腿三层切分，
+// 每层独立变换逼近"这个人在出招/在挨打"。切分比例做成常量, 个别立绘姿势差异可在此微调。
+const PUPPET = { HEAD: 0.22, TORSO: 0.56 };   // 头占顶22% 躯干占中56% 腿=剩余22%
+// puppet 姿态: lean=躯干前倾角(+, 顶向画面右) squash=Y缩放(1=常态) headLean/headDX/headDY=头部附加
+//             legDX/legDY/legLean=腿部附加(后蹬/屈膝)
+// pose.whole=true 时整图变换(供 64px 像素小人用: 其头切片仅14px且盔缨留白大, 硬切三层会裂)，
+// 头部/腿部附加量按权重并入整体 lean 与位移, 姿态代码两套角色通用
+function drawPuppet(im, x, y, h, mirror, alpha, pose) {
+  pose = pose || {};
   const w = h * im.width / im.height;
+  const hh = h * PUPPET.HEAD, th = h * PUPPET.TORSO, bh = h - hh - th; // 三层高度
+  const imH = im.height, imW = im.width;
+  const dir = mirror ? -1 : 1; // 镜像后旋转方向视觉上翻转, 统一用"画面坐标"语义
+  const leanDeg = pose.whole ? (pose.lean || 0) + (pose.headLean || 0) * 0.5 + (pose.legLean || 0) * 0.3 : (pose.lean || 0);
+  const lean = leanDeg * Math.PI / 180;
+  const headLean = (pose.headLean || 0) * Math.PI / 180;
+  const legLean = (pose.legLean || 0) * Math.PI / 180;
+  const squash = pose.squash === undefined ? 1 : pose.squash;
   ctx.save();
   ctx.globalAlpha = alpha === undefined ? 1 : alpha;
-  const yy = y + (bob || 0);
-  if (mirror) { ctx.translate(x + w, yy); ctx.scale(-1, 1); ctx.drawImage(im, 0, 0, w, h); }
-  else ctx.drawImage(im, x, yy, w, h);
+  ctx.translate(x + w / 2, y + h);                 // 原点移到脚底中心(整个人绕脚变换)
+  if (mirror) ctx.scale(-1, 1);
+  ctx.rotate(dir * lean);
+  ctx.scale(1, squash);
+  if (pose.whole) {                                // 像素小人: 整图变换, 附加量已并入
+    ctx.drawImage(im, -w / 2 + (pose.legDX || 0) * 0.5 + (pose.headDX || 0) * 0.5,
+                  -h + (pose.legDY || 0) + (pose.headDY || 0), w, h);
+    ctx.restore();
+    return w;
+  }
+  // 腿( hip 为轴, 可后蹬/屈膝 )
+  ctx.save();
+  ctx.translate(pose.legDX || 0, -bh + (pose.legDY || 0));
+  if (legLean) { ctx.translate(0, bh); ctx.rotate(dir * legLean); ctx.translate(0, -bh); }
+  ctx.drawImage(im, 0, imH * (PUPPET.HEAD + PUPPET.TORSO), imW, imH * (1 - PUPPET.HEAD - PUPPET.TORSO),
+                -w / 2, -bh, w, bh);
+  ctx.restore();
+  // 躯干( 随 lean/squash 整体走, 无附加变换 )
+  ctx.drawImage(im, 0, imH * PUPPET.HEAD, imW, imH * PUPPET.TORSO, -w / 2, -bh - th, w, th);
+  // 头( neck 为轴附加点头/后仰 )
+  ctx.save();
+  ctx.translate(pose.headDX || 0, -h + (pose.headDY || 0));
+  if (headLean) { ctx.translate(0, hh); ctx.rotate(dir * headLean); ctx.translate(0, -hh); }
+  ctx.drawImage(im, 0, 0, imW, imH * PUPPET.HEAD, -w / 2, 0, w, hh);
+  ctx.restore();
   ctx.restore();
   return w;
+}
+// easeOutBack: 收招过冲回弹(机战式挥空后回位)
+function easeOutBack(t) { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); }
+
+// 攻方姿态时间轴: 待机呼吸 -> 蓄力下沉 -> 出招前送(腿后蹬) -> 收招过冲回弹
+// tStrike=命中时刻(相对t0), p=当前进度(相对t0)
+function fightAttPose(p, now, tStrike) {
+  const chargeP = win(p, FT.enter, tStrike);            // 蓄力进度
+  const strikeIn = win(p, tStrike - 110, tStrike + 20); // 前送(快)
+  const strikeOut = win(p, tStrike + 20, tStrike + 310);// 回弹(带回冲)
+  const breathe = Math.sin(now / 280) * 0.012;          // 待机呼吸
+  const snap = strikeIn * (1 - easeOutBack(strikeOut)); // 出招冲量(归位时过冲为负)
+  return {
+    lean: 6 * chargeP + 9 * snap,                       // 蓄力前倾6°(沉身) -> 出招躯干前送9°
+    headLean: 4 * chargeP + 5 * Math.max(0, snap) + Math.sin(now / 420) * 1.5, // 头随躯干+待机微侧1.5°
+    headDY: 5 * chargeP,                                // 蓄力头下沉(蓄势感)
+    squash: (1 - 0.07 * chargeP) * (1 + 0.035 * Math.max(0, snap)) + breathe, // 下蹲0.93 / 出招挺直
+    legDX: -12 * Math.max(0, snap) + 3 * chargeP,       // 出招腿后蹬 / 蓄力重心前移
+    legDY: 3 * chargeP,                                 // 蓄力屈膝
+    legLean: -6 * Math.max(0, snap),                    // 后腿蹬直
+  };
+}
+// 守方姿态时间轴: 待机呼吸 -> 受击"快起-峰值定格-带颤动回落"(机战受击帧要停得住) -> 归位
+// sprite 守方(64px 像素小人)变换不敏感, 幅度×1.35 补偿; 落空改侧闪倾身
+function fightDefPose(p, now, tStrike, isMiss, crit, freezeHit, isPortrait) {
+  let hitP = win(p, tStrike, tStrike + 430);
+  if (freezeHit) hitP = 0.3;                            // 击破定格: 定在受击峰值帧(机战撃破冻结)
+  // 受击冲量: 0~0.15 快起, 0.15~0.5 峰值定格(挨打要停半拍), 0.5~1 颤动回落
+  const recoil = Math.min(win(hitP, 0, 0.15), 1 - win(hitP, 0.5, 1));
+  // 回落段两次颤动(衰减)
+  const tremble = (hitP > 0.5 && hitP < 1) ? Math.sin((hitP - 0.5) * Math.PI * 4) * (1 - hitP) : 0;
+  const k = (crit ? 1.25 : 1) * (isPortrait ? 1 : 1.5); // crit 更狠 / 像素小人整图变换需更大幅度
+  const breathe = Math.sin(now / 300) * 0.01;
+  if (isMiss) return {                                 // 侧闪: 整体向闪避方向倾身
+    lean: -7 * recoil, squash: 1 - 0.03 * recoil + breathe,
+    headLean: -4 * recoil, legDX: -6 * recoil, legLean: 6 * recoil,
+  };
+  return {                                             // 后仰被打弯腰 -> 颤动回弹
+    lean: (11 * recoil + 6 * tremble) * k,             // 躯干后仰11°(crit×1.25)
+    headLean: (14 * recoil + 7 * tremble) * k,         // 头部后仰14°
+    squash: 1 - 0.08 * recoil * k + breathe,           // 弯腰感
+    legDX: 6 * recoil, legDY: -4 * recoil,             // 重心后错
+    legLean: 5 * recoil * k,
+  };
 }
 
 // 战斗场景入位: 由 animateEvent 调用, 填好 FIGHT 全部状态
@@ -57,6 +139,7 @@ function startFight(ev) {
   FIGHT.crit = !!ev.isCrit;
   FIGHT.isMiss = (ev.type === 'miss');
   FIGHT.t0 = now;
+  FIGHT.skip = false; // P1-10: 点击画面跳过演出标记
   FIGHT.sparks = [];
   FIGHT.durOut = FT.out + (FIGHT.crit ? 240 : 0);
   FIGHT.weaponName = ev.w.name;
@@ -398,53 +481,54 @@ function drawFightScene(nowReal) {
   const defW0 = FIGHT.defIsPortrait ? PH * (FIGHT.defImg.width / FIGHT.defImg.height) : 400;
   const defRestX = CW - 96 - defW0;
   const defX = CW + 60 - ease * (CW + 60 - defRestX);
-  // 命中后仰 / 落空侧闪
+  // P1-9: 受击后仰进度(守方 puppet 姿态驱动); 击破定格期间姿态锁在峰值帧
   const hitP = win(p, tStrike, tStrike + 430);
   const recoil = (hitP > 0 && hitP < 1) ? Math.sin(hitP * Math.PI) : 0;
+  const freezeHit = !!ev.killed && p >= killAt && p < killAt + 500;
   let defShakeX;
   if (FIGHT.isMiss) defShakeX = -recoil * 90; // 守方向右后方闪避(面向左,身后=+x取负避开)
-  else defShakeX = recoil * (24 + (crit ? 14 : 0)) * (0.55 + Math.random() * 0.45);
-  const defBob = Math.sin(now / 150) * 2;
-  // 攻方蓄力脉动
-  const chargeP = win(p, FT.enter, tStrike);
-  const pulse = (chargeP > 0 && chargeP < 1) ? 1 + Math.sin(now / 70) * 0.02 * chargeP : 1;
-  // 突进类位移
+  else defShakeX = recoil * (16 + (crit ? 10 : 0)) * (0.55 + Math.random() * 0.45);
+  // 突进类位移(整体位移保留, 但不再是唯一动作——身体姿态由 puppet 层表达)
   let attLunge = 0, attLeapY = 0;
   const sp2 = win(p, tStrike - 70, tStrike + 140);
   if (FIGHT.animKind === 'dash' || FIGHT.animKind === 'stab')
-    attLunge = Math.sin(Math.min(1, sp2) * Math.PI) * (CW * 0.30);
+    attLunge = Math.sin(Math.min(1, sp2) * Math.PI) * (CW * 0.22);
   if (FIGHT.animKind === 'smash') // 跃起下砸
     attLeapY = -Math.sin(Math.min(1, sp2) * Math.PI) * 130;
+  // P1-9: 双方 puppet 姿态(像素小人走整图变换: 64px 源图切三层会裂)
+  const attPose = fightAttPose(p, now, tStrike);
+  attPose.whole = !FIGHT.attIsPortrait;
+  const defPose = fightDefPose(p, now, tStrike, FIGHT.isMiss, crit, freezeHit, FIGHT.defIsPortrait);
+  defPose.whole = !FIGHT.defIsPortrait;
 
-  // --- 守方(先画; 落空时叠加2道残影) ---
+  // --- 守方(先画; 落空时叠加2道残影; 受击/侧闪由 puppet 姿态表达) ---
   const defH = FIGHT.defIsPortrait ? PH : 420; // 无立绘角色 sprite 放大到 420
   const defY = standY + (FIGHT.defIsPortrait ? 0 : 100);
   if (FIGHT.isMiss && hitP > 0 && hitP < 1) {
-    drawStand(FIGHT.defImg, defX + defShakeX * 0.4, defY, defH, true, 0.22 * outA, defBob);
-    drawStand(FIGHT.defImg, defX + defShakeX * 0.7, defY, defH, true, 0.12 * outA, defBob);
+    drawPuppet(FIGHT.defImg, defX + defShakeX * 0.4, defY, defH, true, 0.22 * outA, defPose);
+    drawPuppet(FIGHT.defImg, defX + defShakeX * 0.7, defY, defH, true, 0.12 * outA, defPose);
   }
-  const defW = drawStand(FIGHT.defImg, defX + defShakeX, defY, defH, true, outA, defBob);
-  // 受击白闪(落空无)
+  const defW = drawPuppet(FIGHT.defImg, defX + defShakeX, defY, defH, true, outA, defPose);
+  // crit 双影(更强打击感)
+  if (!FIGHT.isMiss && crit && hitP > 0.05 && hitP < 0.85)
+    drawPuppet(FIGHT.defImg, defX + defShakeX - 16 * recoil, defY + 5, defH, true, 0.30 * (1 - hitP) * outA, defPose);
+  // 受击白闪(落空无; crit 加强)
   if (!FIGHT.isMiss && hitP > 0 && hitP < 0.5) {
     ctx.save();
-    ctx.globalAlpha = (0.5 - hitP) * 1.5 * outA;
+    ctx.globalAlpha = Math.min(1, (0.5 - hitP) * (crit ? 2.4 : 1.5)) * outA;
     ctx.globalCompositeOperation = 'source-atop';
     ctx.fillStyle = '#fff';
     ctx.fillRect(defX - 30, defY - 30, defW + 80, defH + 60);
     ctx.restore();
   }
 
-  // --- 攻方 ---
+  // --- 攻方(puppet: 呼吸/下蹲蓄力/前送出招/过冲收招) ---
   const attH = FIGHT.attIsPortrait ? PH : 420;
   const attY = standY + (FIGHT.attIsPortrait ? 0 : 100) + attLeapY;
-  ctx.save();
-  ctx.translate(attX + attLunge, attY);
-  ctx.scale(pulse, pulse);
-  ctx.translate(-(attX + attLunge), -attY);
-  drawStand(FIGHT.attImg, attX + attLunge, attY, attH, false, outA, 0);
-  ctx.restore();
+  drawPuppet(FIGHT.attImg, attX + attLunge, attY, attH, false, outA, attPose);
 
-  // --- 蓄力光球(攻方右前方=出手点) ---
+  // --- 蓄力光球(攻方右前方=出手点; chargeP=蓄力进度驱动光球聚合) ---
+  const chargeP = win(p, FT.enter, tStrike);
   let gunX = attX + attLunge + (FIGHT.attIsPortrait ? 300 : 250);
   let gunY = attY + attH * 0.42;
   if (chargeP > 0.12 && p < tStrike + 40) {
@@ -522,6 +606,17 @@ function drawFightScene(nowReal) {
     ctx.strokeText(FIGHT.weaponName, tx, 92);
     ctx.fillStyle = '#fff8e0';
     ctx.fillText(FIGHT.weaponName, tx, 92);
+    ctx.restore();
+  }
+  // P1-10: 跳过提示(入位后淡入, 演出后半段保留; 点击任意处直接收尾)
+  const hintA = win(p, FT.enter + 200, FT.enter + 500) * 0.55 * outA;
+  if (hintA > 0) {
+    ctx.save();
+    ctx.globalAlpha = hintA;
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.font = '16px KaiTi,STKaiti,"Microsoft YaHei",serif';
+    ctx.fillStyle = '#cfc4e8';
+    ctx.fillText('点击画面 跳过演出 ▸', CW - 26, CH - 22);
     ctx.restore();
   }
 
@@ -946,6 +1041,12 @@ async function doCombo(u, center) {
   finishUnit(u, true);
 }
 
+// P1-10: 可跳过的等待——点击画面置 FIGHT.skip 立即收尾(敌我双方演出通用)
+async function waitFightEnd() {
+  while (FIGHT.active && !FIGHT.skip && performance.now() - FIGHT.t0 < FIGHT.durOut + 40)
+    await sleep(60);
+}
+
 // 战斗演出
 async function animateEvent(ev, skipMotif) {
   if (ev.type === 'miss' || ev.type === 'evade') {
@@ -954,7 +1055,7 @@ async function animateEvent(ev, skipMotif) {
       : `${ev.def.cn} 游身闪过 ${ev.w.name}！`);
     if (fxOn) { // P0-1: 落空也进横版场景(侧闪+大字), 不再是一张静态图
       startFight(ev);
-      try { await sleep(FIGHT.durOut + 40); } finally { endFight(); }
+      try { await waitFightEnd(); } finally { endFight(); }
     } else await sleep(500);
     return;
   }
@@ -962,7 +1063,7 @@ async function animateEvent(ev, skipMotif) {
   if (fxOn) {
     seHit(); if (ev.isCrit) seCrit();
     startFight(ev);
-    try { await sleep(FIGHT.durOut + 40); } finally { endFight(); }
+    try { await waitFightEnd(); } finally { endFight(); }
   } else {
     seHit(); if (ev.isCrit) seCrit();
     banner(ev.w.name + (ev.isCrit ? ' ·会心！' : ''), ev.isCrit ? 900 : 650);
@@ -1141,6 +1242,8 @@ cv.addEventListener('mousemove', e => {
 cv.addEventListener('mouseleave', () => { mouse.x = -1; });
 
 cv.addEventListener('click', async () => {
+  // P1-10: 演出期间点击=跳过(最优先; 敌方回合演出也能跳)
+  if (FIGHT.active) { FIGHT.skip = true; return; }
   if (G.over || G.phase !== 'player') return;
   const { x, y } = mouse;
   if (x < 0 || x >= W || y < 0 || y >= H) return;

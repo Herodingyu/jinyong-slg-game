@@ -70,8 +70,8 @@ function forecast(att, def, w) {
   const tE = TERRAIN[terrainAt(def.x, def.y)];
   const tA = TERRAIN[terrainAt(att.x, att.y)];
   let hitp = 90 + (att.hit - def.evd) * 0.4 - tE.eva * 0.5 + (tA.def ? 0 : 0);
-  if (att.buffs.mustHit) hitp = 100;
   hitp = Math.max(5, Math.min(97, Math.round(hitp)));
+  if (att.buffs.mustHit) hitp = 100; // 必中buff凌驾命中率上限(放在clamp后, 否则被压回97)
   let dmg = w.pow + att.atk * 4 - def.def * 3;
   dmg *= 1 - (tE.def || 0) / 100;
   dmg *= 1 + Math.min(att.will - 100, 50) * 0.004; // 气势增伤
