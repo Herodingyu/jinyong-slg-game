@@ -57,5 +57,11 @@
 
 - **#17 判决关闭**：P1-9 立绘 puppet 分层动画完成（见 IMPROVE.md 执行记录 2026-10-21），"人物不会动"核心问题解决；残余差距（无逐帧挥砍/武器跟随）受零新素材约束，自评见当日报告。
 - **#20 P1 engine 必中buff失效（已修复）**：forecast 先 `mustHit→hitp=100` 后被 `clamp(5..97)` 压回 97 → 3% 概率"必中落空"。测试 20 连跑约 1-2 次炸（伤害=undefined 实为 miss 事件无 dmg 字段）。修复：clamp 后再判 mustHit。这是**规则层 bug**：AI 决战技/合体技 showHit 显示的 100% 实际只有 97%，影响玩家信任。已用 tools/probe_musthit.js 2 万次回归验证。
-- **#21 P2 test_fx_b1_case 随机会心抖动**：case 第 1 段用真随机 resolveAttack，15% 概率会心 → hpAnim.per=26 ≠ 断言的 40（crit 设计如此）。非产品 bug，测试台应锁 RNG（Math.random 打桩）或断言放宽为 per∈{26,40}，明天顺手修。
+- **#21 P2 test_fx_b1_case 随机会心抖动**：~~case 第 1 段用真随机 resolveAttack，15% 概率会心 → hpAnim.per=26 ≠ 断言的 40（crit 设计如此）。非产品 bug，测试台应锁 RNG（Math.random 打桩）或断言放宽为 per∈{26,40}，明天顺手修。~~ **✅ 2026-10-22 已修**：首次 resolveAttack 前打桩 Math.random=()=>0.99（必中且非会心），与 1b 段共用 origRand 恢复；20 连跑全绿。
 - **#22 P3 sprite 构图差异**：units/liaobing.png 角色实际占帧 82% 高（盔缨在 8%~95%），与 portraits 全身构图完全不同；PUPPET 切分常量只适用于立绘，sprite 一律走 drawPuppet 整图变换分支（pose.whole）。未来新增立绘时需逐张校准 PUPPET.HEAD/TORSO。
+
+## 追加记录（2026-10-22，F-Day4 执行中评审新发现）
+
+- **#23 P2 合体技多目标场景不连续**：doCombo 对每个命中敌人各开一场 FIGHT（入画→演出→收招×N），敌人多于 1 时镜头反复出入，与 SRW 合体技"一个长镜头敌人挨个受击"有差距。现版本单体命中观感已达标（双立绘+接力可读）；多目标连打连续性入 P2 队列（需要 FIGHT 场景内目标轮换机制）。
+- **#24 P2 开场镜头前 0.6s 只有变焦无名号**：镜头推近期(0~600ms)无文字信息，纯运镜；P3-11a 剧情标题卡（「序章 破庙残谱」黑底大字）若先做，可填这段空窗并顺势立起对白框系统。
+- **#25 P2 守方无立绘时合体技"双立绘"单侧**：3×3 范围内的辽兵/辽将无 portraits，FIGHT 守方仍是 sprite 放大；只有攻击侧是双立绘。SRW 无所谓（守方本来就用机体小图），自评可接受；若未来给辽将补立绘自动受益。

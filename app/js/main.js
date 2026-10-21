@@ -32,7 +32,55 @@ const FIGHT = { active: false, ev: null, t0: 0, crit: false, isMiss: false, spar
                 attImg: null, defImg: null, attIsPortrait: false, defIsPortrait: false,
                 weaponName: '', animKind: 'dash', animColor: '#ffb84a', durOut: FT.out,
                 killAt: 0,       // P1-5: HP归零时刻(相对t0), 击破定格+台词时间轴锚点
+                comboPartner: null,  // P1-7: 合体技搭档单位(双立绘同框), 由 ev.partner 注入
+                partnerImg: null, partnerIsPortrait: false, _relaySparked: false,
                 gunX: 0, gunY: 0 };
+
+// P1-8: 开场镜头调度 — 开场横幅后镜头变焦扫场(我方→敌方→BOSS→归位) + 敌我位置脉冲
+const INTRO = { active: false, t0: 0, dur: 3400 };
+// 镜头参数: 世界点P映射到屏幕 = C + pan + s·(P−C)。关键帧给"想看的兴趣点",
+// pan 钳制在不留空边范围内(画布=地图尺寸, 变焦 1.45 换扫场空间)
+function introCam(ip) {
+  const CWX = cv.width / 2, CWY = cv.height / 2;
+  // 变焦: 0~500ms 推近至1.45, 最后800ms ease 回 1.0
+  const s = 1 + 0.45 * Math.min(1, ip / 500) * (1 - win(ip, INTRO.dur - 800, INTRO.dur));
+  // 扫场关键帧: [时刻ms, 视野中心世界x, 世界y]
+  const KF = [[0, CWX, CWY], [600, 352, 544], [1400, 300, 170], [2300, 660, 190], [INTRO.dur - 800, CWX, CWY]];
+  let cx = CWX, cy = CWY;
+  for (let i = 0; i < KF.length - 1; i++) {
+    const [t0, x0, y0] = KF[i], [t1, x1, y1] = KF[i + 1];
+    if (ip >= t0 && ip <= t1) {
+      let u = (ip - t0) / (t1 - t0);
+      u = u * u * (3 - 2 * u); // smoothstep 缓入缓出, 镜头不顿挫
+      cx = x0 + (x1 - x0) * u; cy = y0 + (y1 - y0) * u;
+      break;
+    }
+  }
+  const maxPX = CWX * (s - 1), maxPY = CWY * (s - 1); // 空边钳制
+  const px = Math.max(-maxPX, Math.min(maxPX, s * (CWX - cx)));
+  const py = Math.max(-maxPY, Math.min(maxPY, s * (CWY - cy)));
+  return { s, px, py };
+}
+// 敌我位置脉冲: 开场逐个点名(我方蓝圈→敌方红圈→BOSS金圈压轴), 玩家第一眼定位
+function drawIntroPulses(now) {
+  const ip = now - INTRO.t0;
+  const ring = (wx, wy, t, color, big) => {
+    if (t <= 0 || t >= 1) return;
+    const r = (big ? 20 : 14) + t * TS * (big ? 1.15 : 0.8);
+    ctx.save();
+    ctx.globalAlpha = (1 - t) * 0.9;
+    ctx.strokeStyle = color; ctx.lineWidth = 4 - t * 2;
+    ctx.beginPath(); ctx.ellipse(wx, wy, r, r * 0.6, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  };
+  G.units.filter(u => u.side === 'player' && u.hp > 0).forEach((u, i) => {
+    ring(u.x * TS + TS / 2, u.y * TS + TS / 2, win(ip, 200 + i * 140, 700 + i * 140), '#6cb0ff');
+  });
+  G.units.filter(u => u.side === 'enemy' && u.hp > 0).forEach((u, i) => {
+    ring(u.x * TS + TS / 2, u.y * TS + TS / 2, win(ip, 1300 + i * 160, 1900 + i * 160),
+         u.boss ? '#ffd24a' : '#ff6050', u.boss);
+  });
+}
 
 // 窗口进度: p 在 [a,b] 间的归一化位置(0→1)
 function win(p, a, b) { return Math.max(0, Math.min(1, (p - a) / (b - a))); }
@@ -107,6 +155,22 @@ function fightAttPose(p, now, tStrike) {
     legLean: -6 * Math.max(0, snap),                    // 后腿蹬直
   };
 }
+// P1-7: 合体技搭档姿态 — 蓄力与主攻同步(双人同频运劲), 出招冲量晚~130ms再起:
+// 主攻先至、搭档接力, 机战合体技的"双动机接力"打击感; 其余基底参数复用 fightAttPose
+function fightPartnerPose(p, now, tStrike) {
+  const pose = fightAttPose(p, now, tStrike);
+  const relayIn = win(p, tStrike + 30, tStrike + 150);      // 接力前送(快)
+  const relayOut = win(p, tStrike + 150, tStrike + 460);      // 接力回弹(带回冲)
+  const relay = relayIn * (1 - easeOutBack(relayOut));
+  const snap = Math.max(0, relay);
+  pose.lean = (pose.lean || 0) + 13 * relay;                  // 躯干接力前送(要比主攻更狠才读得出接力)
+  pose.headLean = (pose.headLean || 0) + 7 * snap;            // 头部跟随
+  pose.squash = (pose.squash === undefined ? 1 : pose.squash) + 0.04 * snap;
+  pose.legDX = (pose.legDX || 0) - 14 * snap;               // 接力腿后蹬
+  pose.legLean = (pose.legLean || 0) - 7 * snap;            // 后腿蹬直
+  return pose;
+}
+
 // 守方姿态时间轴: 待机呼吸 -> 受击"快起-峰值定格-带颤动回落"(机战受击帧要停得住) -> 归位
 // sprite 守方(64px 像素小人)变换不敏感, 幅度×1.35 补偿; 落空改侧闪倾身
 function fightDefPose(p, now, tStrike, isMiss, crit, freezeHit, isPortrait) {
@@ -152,6 +216,14 @@ function startFight(ev) {
   FIGHT.defIsPortrait = !!(dp && dp.complete);
   FIGHT.attImg = FIGHT.attIsPortrait ? ap : sprites[ev.att.sprite];
   FIGHT.defImg = FIGHT.defIsPortrait ? dp : sprites[ev.def.sprite];
+  // P1-7: 合体技双立绘同框 — 搭档单位从 ev.partner 注入(规则层零改动, 仅表现消费)
+  FIGHT.comboPartner = ev.partner || null;
+  FIGHT._relaySparked = false;
+  if (FIGHT.comboPartner) {
+    const pp = portraits[FIGHT.comboPartner.sprite];
+    FIGHT.partnerIsPortrait = !!(pp && pp.complete);
+    FIGHT.partnerImg = FIGHT.partnerIsPortrait ? pp : sprites[FIGHT.comboPartner.sprite];
+  } else { FIGHT.partnerImg = null; FIGHT.partnerIsPortrait = false; }
   if (FIGHT.isMiss) { // 落空: 守方不扣血, 无爆闪无震屏
     FIGHT.killAt = 0;
     FX.hpAnim = null;
@@ -176,6 +248,7 @@ function startFight(ev) {
 function endFight() {
   FIGHT.active = false; FIGHT.ev = null; FIGHT.sparks = [];
   FIGHT.killAt = 0;
+  FIGHT.comboPartner = null; FIGHT.partnerImg = null; FIGHT._relaySparked = false; // P1-7
   FX.hpAnim = null;
 }
 
@@ -264,6 +337,17 @@ function draw() {
   if (fxOn && now < FX.shakeUntil) {
     ctx.translate((Math.random() * 2 - 1) * 5, (Math.random() * 2 - 1) * 5);
   }
+  // P1-8: 开场镜头 — 推镜扫场期间整个世界坐标系跟着镜头走(覆盖层不受影响)
+  if (INTRO.active) {
+    const ip = now - INTRO.t0;
+    if (ip >= INTRO.dur || !fxOn) INTRO.active = false;
+    else {
+      const cam = introCam(ip);
+      ctx.translate(cv.width / 2 + cam.px, cv.height / 2 + cam.py);
+      ctx.scale(cam.s, cam.s);
+      ctx.translate(-cv.width / 2, -cv.height / 2);
+    }
+  }
   // B1 缩略图模式: 演出期间战场整体缩至~40%并置底, 主视觉让给立绘与大字
   const mini = fxOn && FX.miniOn;
   if (mini) {
@@ -342,7 +426,9 @@ function draw() {
     ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 1;
     ctx.strokeRect(mouse.x * TS + .5, mouse.y * TS + .5, TS - 1, TS - 1);
   }
-  ctx.restore(); // 震动/缩略图变换结束, 覆盖层不参与抖动
+  // P1-8: 开场点名脉冲(世界坐标, 随镜头变焦)
+  if (INTRO.active) drawIntroPulses(now);
+  ctx.restore(); // 震动/缩略图/开场镜头变换结束, 覆盖层不参与抖动
   if (FX.floats.length) FX.floats = FX.floats.filter(f => now - f.t0 <= 1040);
 
   // B2: 战斗场景覆盖一切; 否则走旧立绘切入路径
@@ -525,12 +611,32 @@ function drawFightScene(nowReal) {
   // --- 攻方(puppet: 呼吸/下蹲蓄力/前送出招/过冲收招) ---
   const attH = FIGHT.attIsPortrait ? PH : 420;
   const attY = standY + (FIGHT.attIsPortrait ? 0 : 100) + attLeapY;
+  const attW0 = attH * (FIGHT.attImg.width / FIGHT.attImg.height); // 立绘宽(搭档站位用)
+  // P1-7: 合体技双立绘同框 — 搭档画在主攻右侧(萧左郭右), 先画搭档让主攻叠其上;
+  // 蓄力同频, 出招接力晚~130ms(双动机接力), 突进位移只跟 30%(主攻是镜头主角)
+  let partnerX = 0, partnerY = 0, partnerH = 0;
+  if (FIGHT.comboPartner) {
+    partnerH = FIGHT.partnerIsPortrait ? PH * 0.92 : 400;
+    partnerX = attX + attLunge * 0.3 + attW0 * 0.60;
+    partnerY = standY + (FIGHT.partnerIsPortrait ? 6 : 108);
+    const pPose = fightPartnerPose(p, now, tStrike);
+    pPose.whole = !FIGHT.partnerIsPortrait;
+    // 接力突进: 搭档在主攻命中后向前扑出一段(静止帧也要读得出"接力"), 随回弹归位
+    const relayLunge = win(p, tStrike + 30, tStrike + 170) * (1 - win(p, tStrike + 170, tStrike + 420)) * 46;
+    drawPuppet(FIGHT.partnerImg, partnerX + relayLunge, partnerY, partnerH, false, outA, pPose);
+  }
   drawPuppet(FIGHT.attImg, attX + attLunge, attY, attH, false, outA, attPose);
 
   // --- 蓄力光球(攻方右前方=出手点; chargeP=蓄力进度驱动光球聚合) ---
   const chargeP = win(p, FT.enter, tStrike);
   let gunX = attX + attLunge + (FIGHT.attIsPortrait ? 300 : 250);
   let gunY = attY + attH * 0.42;
+  if (FIGHT.comboPartner) {
+    // 合体技: 光球在双立绘手部之间聚合(两人内力合流, 再一道发出)
+    const pHandX = partnerX + (FIGHT.partnerIsPortrait ? 250 : 210);
+    const pHandY = partnerY + partnerH * 0.42;
+    gunX = (gunX + pHandX) / 2; gunY = (gunY + pHandY) / 2;
+  }
   if (chargeP > 0.12 && p < tStrike + 40) {
     const gr = 11 + chargeP * 24 + Math.sin(now / 60) * 4;
     const g = ctx.createRadialGradient(gunX, gunY, 0, gunX, gunY, gr * 2.2);
@@ -571,6 +677,12 @@ function drawFightScene(nowReal) {
     }
   } else if (p >= tStrike) {
     if (p - tStrike < 70) spawnSparks(defCx, defCy, FIGHT.animColor, crit ? 26 : 15);
+    // P1-7: 合体技接力二段 — 搭档晚~130ms接力出手, 金色火花补爆+震屏追加(一次性)
+    if (FIGHT.comboPartner && !FIGHT._relaySparked && p >= tStrike + 130) {
+      spawnSparks(defCx, defCy, '#ffd24a', 18);
+      FX.shakeUntil = Math.max(FX.shakeUntil, performance.now() + 420);
+      FIGHT._relaySparked = true;
+    }
     drawSparks(now);
     const dp = win(p, tStrike + 60, tStrike + 980);
     if (dp > 0 && dp < 1) {
@@ -594,18 +706,31 @@ function drawFightScene(nowReal) {
     }
   } else drawSparks(now);
 
-  // --- 顶部: 武器名标题(入位后浮现) ---
+  // --- 顶部: 武器名标题(入位后浮现); 合体技升级: 金漆组合名+双侠副题 ---
   const titleA = win(p, FT.enter - 80, FT.enter + 60) * (1 - win(p, tStrike - 60, tStrike + 60));
   if (titleA > 0) {
     ctx.save();
     ctx.globalAlpha = titleA * outA;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = 'bold 40px KaiTi,STKaiti,"Microsoft YaHei",serif';
     const tx = CW / 2;
-    ctx.lineWidth = 9; ctx.strokeStyle = '#1a1030';
-    ctx.strokeText(FIGHT.weaponName, tx, 92);
-    ctx.fillStyle = '#fff8e0';
-    ctx.fillText(FIGHT.weaponName, tx, 92);
+    if (FIGHT.comboPartner) { // P1-7: 组合技大字待遇(金漆+双侠合璧副题)
+      ctx.font = 'bold 50px KaiTi,STKaiti,"Microsoft YaHei",serif';
+      ctx.lineWidth = 11; ctx.strokeStyle = '#4a2a08';
+      ctx.strokeText(FIGHT.weaponName, tx, 88);
+      ctx.fillStyle = '#ffd24a';
+      ctx.fillText(FIGHT.weaponName, tx, 88);
+      ctx.font = 'bold 21px KaiTi,STKaiti,"Microsoft YaHei",serif';
+      ctx.lineWidth = 6; ctx.strokeStyle = '#1a1030';
+      ctx.strokeText(ev.att.cn + ' · ' + FIGHT.comboPartner.cn + '　合璧一击', tx, 130);
+      ctx.fillStyle = '#fff0c0';
+      ctx.fillText(ev.att.cn + ' · ' + FIGHT.comboPartner.cn + '　合璧一击', tx, 130);
+    } else {
+      ctx.font = 'bold 40px KaiTi,STKaiti,"Microsoft YaHei",serif';
+      ctx.lineWidth = 9; ctx.strokeStyle = '#1a1030';
+      ctx.strokeText(FIGHT.weaponName, tx, 92);
+      ctx.fillStyle = '#fff8e0';
+      ctx.fillText(FIGHT.weaponName, tx, 92);
+    }
     ctx.restore();
   }
   // P1-10: 跳过提示(入位后淡入, 演出后半段保留; 点击任意处直接收尾)
@@ -620,8 +745,9 @@ function drawFightScene(nowReal) {
     ctx.restore();
   }
 
-  // --- 底部 HP 条(双方, 机战样式) ---
-  drawFightHpBar(ev.att, CW * 0.06, CH - 96, false);
+  // --- 底部 HP 条(双方, 机战样式); 合体技左侧显示双侠合璧名 ---
+  drawFightHpBar(ev.att, CW * 0.06, CH - 96, false,
+    FIGHT.comboPartner ? ev.att.cn + ' · ' + FIGHT.comboPartner.cn : null);
   drawFightHpBar(ev.def, CW * 0.54, CH - 96, true);
   ctx.restore();
 
@@ -665,7 +791,7 @@ function drawFightScene(nowReal) {
 }
 
 // 战斗场景 HP 条(左攻右守, 守方条同步逐格动画)
-function drawFightHpBar(u, x, y, isDef) {
+function drawFightHpBar(u, x, y, isDef, label) {
   const bw = cv.width * 0.40, bh = 14;
   const cur = (fxOn && isDef && FX.hpAnim && FX.hpAnim.u === u)
     ? Math.max(0, hpAnimValue(performance.now())) : u.hp;
@@ -673,7 +799,7 @@ function drawFightHpBar(u, x, y, isDef) {
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   ctx.font = 'bold 17px KaiTi,STKaiti,"Microsoft YaHei",serif';
   ctx.fillStyle = '#fff8e0';
-  ctx.fillText(u.cn, x, y - 12);
+  ctx.fillText(label || u.cn, x, y - 12);
   ctx.textAlign = 'right';
   ctx.font = 'bold 15px monospace';
   ctx.fillStyle = u.side === 'player' ? '#8fd08f' : '#ff9a8a';
@@ -1036,6 +1162,7 @@ async function doCombo(u, center) {
   for (const e of hitSet) {
     // 经 opts 传临时buff/膂力加成, resolveAttack 的气势增减直接落在真身
     const ev = resolveAttack(u, e, fakeW, { buffs: { mustHit: true }, atkBonus: p.atk });
+    ev.partner = p; // P1-7: 双立绘同框(郭靖入画接力), 表现层消费, 规则层零改动
     await animateEvent(ev, true);
   }
   finishUnit(u, true);
@@ -1244,6 +1371,8 @@ cv.addEventListener('mouseleave', () => { mouse.x = -1; });
 cv.addEventListener('click', async () => {
   // P1-10: 演出期间点击=跳过(最优先; 敌方回合演出也能跳)
   if (FIGHT.active) { FIGHT.skip = true; return; }
+  // P1-8: 开场镜头进行中点击 = 直接收场(不吃掉这次点击做选中)
+  if (INTRO.active) { INTRO.active = false; return; }
   if (G.over || G.phase !== 'player') return;
   const { x, y } = mouse;
   if (x < 0 || x >= W || y < 0 || y >= H) return;
@@ -1295,6 +1424,7 @@ cv.addEventListener('click', async () => {
 
 document.getElementById('endTurn').onclick = () => {
   if (G.phase !== 'player' || G.over) return;
+  if (INTRO.active) return; // P1-8: 开场镜头期间不吃结束回合(避免镜头与敌方回合叠加)
   Sel.unit = null; Sel.moveTiles = null; hideMenus(); showInfo(null);
   G.units.filter(v => v.side === 'player').forEach(v => v.acted = true);
   enemyPhase();
@@ -1318,6 +1448,8 @@ document.getElementById('helpBtn').onclick = () => {
 document.getElementById('startBtn').onclick = () => {
   document.getElementById('intro').classList.add('hidden');
   banner('第 1 回合 · 我方行动', 1200);
+  // P1-8: 开场镜头调度(演出关则直接跳过, 尊重演出开关)
+  if (fxOn) { INTRO.active = true; INTRO.t0 = performance.now(); }
 };
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }

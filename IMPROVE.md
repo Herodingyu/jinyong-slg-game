@@ -17,8 +17,8 @@
 - [x] **P0-4 选中面板立绘头像**：showInfo 时显示 portraits/ 头像（无立绘角色用 sprite 放大回退）。✅ 2026-10-20（同上）
 - [x] **P1-5 击破定格+台词**：FIGHT 内 ev.killed 时白闪定格 ~500ms + 攻方 motto 大字（data.js 已备 motto 字段）。✅ 2026-10-20（白闪定格500ms→击破金字→攻方胜利台词错峰入场；证据 /tmp/fday2/after_p15_freeze.jpg · text.jpg · text2.jpg）
 - [x] **P1-6 运功演出**：发动时「凝神！」「热血！」等 buff 名大字+角色色闪，地图单位头顶小字。✅ 2026-10-20（立绘cutin复用/无立绘大字居中/角色色双扩散环覆盖层置顶/头顶小字；证据 /tmp/fday2/ring_150.jpg · after_p16_spirit_hero.jpg · after_p16_enemy.jpg）
-- [ ] **P1-7 合体技双立绘同框**：萧左郭右同时入画、组合技大字、双动机接力。
-- [ ] **P1-8 开场镜头调度**：开场横幅后镜头扫场（或敌我位置脉冲高亮一圈），让玩家第一眼定位。
+- [x] **P1-7 合体技双立绘同框**：萧左郭右同时入画、组合技大字、双动机接力。✅ 2026-10-22（ev.partner 注入(规则层零改动)；FIGHT.comboPartner 双立绘同框+蓄力光球双人间聚合；接力=主攻命中后搭档晚130ms突进46px+13°前送再回弹(静止帧可读)；金色「双侠镇襄阳」48px+合璧副题；底部血条「萧峰·郭靖」合璧名；证据 evidence/fday4_before/combo_*.jpg → fday4_after/combo_*.jpg）
+- [x] **P1-8 开场镜头调度**：开场横幅后镜头扫场（或敌我位置脉冲高亮一圈），让玩家第一眼定位。✅ 2026-10-22（点「踏入江湖」触发3.4s镜头: 推近1.45x→我方(蓝圈点名)→敌方(红圈)→BOSS(金圈压轴)→ease回全图; 画布=地图尺寸故变焦换扫场空间, pan钳制不留空边; 点击跳过+吞点击不误触选中; endTurn 开场期禁用; 演出关直接跳过; 证据 evidence/fday4_after/intro_*.jpg）
 - [x] **P1-9 战斗立绘"人带招"·puppet 分层动画**（🔴 丁工 10-20 点名：人物不会动——**已升队首并完成**）
 
   机战A 是逐帧动作，我们零新素材，用 canvas 立绘 puppet（伪骨骼）逼近：
@@ -55,3 +55,4 @@
 | 2026-10-19 | P0-1 miss演出 / P0-2 反击自动化+卡死修复 / P0-3 悬停地形；立 AUDIT+IMPROVE 机制，每日 cron(01:17)；机战A标杆调研(references/srw-a-battle-benchmark.md)；闭环铁律入任务书（测试/修改/看效果/再测试/再修改） | /tmp/p0_miss_dodge.jpg · /tmp/p0_enemy.jpg · commit 021ea14 |
 | 2026-10-20 | P0-4 选中立绘头像 / P1-5 击破定格+台词 / P1-6 运功演出；test_fx_b1 修复(B2重写后 miniOn 断言脱节→改验 FIGHT 生命周期)；击破时间轴探针校正(killAt=zeroTicks*per 真值)；环挪覆盖层防立绘遮挡 | /tmp/fday2/*.jpg · test 17/17 · commit 见报告 |
 | 2026-10-21 | **P1-9 立绘puppet分层动画**（头/躯干/腿三层切分+伪骨骼；攻方 呼吸/沉身蓄力/前送出招/过冲收招；守方 快起-峰值定格-颤动回落×2，crit×1.25+双影；击破定格锁受击峰值帧；sprite 守方改整图变换×1.5补偿——64px 源图切三层会裂）+ **P1-10 演出可跳过**（点击即收招+右下角提示，敌我演出通用）+ **engine 必中bug修复**（mustHit=100 被 clamp(≤97) 压回→3%落空率，forecast 两行互换）；评审三轮迭代：蓄力幅度 5%→7%、受击正弦波→平台定格(停得住)、像素小人加幅 | /tmp/fday3_before/*.jpg · /tmp/fday3_after/*.jpg · test 6/6 · verify_skip PASS · commit 见报告 |
+| 2026-10-22 | **P1-7 合体技双立绘同框**（萧左郭右入画/金色组合名/接力突进）+ **P1-8 开场镜头调度**（3.4s 推镜扫场+敌我BOSS脉冲点名+点击跳过）+ **AUDIT#21 测试修脆**（test_fx_b1_case 锁 RNG，20连跑全绿）；评审一轮迭代：接力静止帧读不出→前送9°→13°+突进46px | evidence/fday4_before/*.jpg · evidence/fday4_after/*.jpg · test 20/20 · commit 见报告 |

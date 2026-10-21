@@ -12,6 +12,9 @@ const assert = (cond, msg) => {
 
   // 1) 演出开: 攻击事件期间进入横版战斗场景, 扣血期间 hpAnim 逐格递减
   assert(fxOn === true, '演出默认开启');
+  // AUDIT#21: 锁 RNG — 默认 15% 会心会把 hpAnim.per 抖成 26≠断言的 40, 确定性才能断言
+  const origRand = Math.random;
+  Math.random = () => 0.99; // 命中(必中buff)且非会心
   const hp0 = def.hp;
   const ev = resolveAttack(att, def, w, { buffs: { mustHit: true } });
   assert(ev.type === 'hit' && ev.dmg > 0, `必中命中, 伤害=${ev.dmg}`);
@@ -33,8 +36,7 @@ const assert = (cond, msg) => {
   assert(def.hp === Math.max(0, hp0 - ev.dmg), `HP结算正确 ${hp0}→${def.hp}`);
 
   // 1b) miss/evade 提前返回路径: 不进入缩略图模式, 无状态残留
-  const origRand = Math.random;
-  Math.random = () => 0.99; // 强制掷骰不中
+  // (RNG 仍是 0.99 桩: 强制掷骰不中, 与 1) 共用 origRand)
   const defM = G.units.find(u => u.key === 'duanyq');
   defM.x = att.x + 1; defM.y = att.y;
   const evM = resolveAttack(att, defM, w);
