@@ -205,6 +205,16 @@ function startFight(ev) {
   FIGHT.t0 = now;
   FIGHT.skip = false; // P1-10: 点击画面跳过演出标记
   FIGHT.sparks = [];
+  // 雪粒子: ~70 颗确定性参数(位置由 now 推进, 击破定格自动冻结)
+  FIGHT.snow = [];
+  for (let i = 0; i < 70; i++) {
+    FIGHT.snow.push({
+      x0: Math.random() * cv.width, y0: Math.random() * cv.height,
+      r: 0.8 + Math.random() * 1.6, v: 0.028 + Math.random() * 0.05,
+      drift: -0.008 + Math.random() * 0.016, ph: Math.random() * 6.28,
+      a: 0.35 + Math.random() * 0.5
+    });
+  }
   FIGHT.durOut = FT.out + (FIGHT.crit ? 240 : 0);
   FIGHT.weaponName = ev.w.name;
   const anim = (ev.w.anim) || { kind: 'dash', color: '#ffb84a' };
@@ -246,7 +256,7 @@ function startFight(ev) {
   }
 }
 function endFight() {
-  FIGHT.active = false; FIGHT.ev = null; FIGHT.sparks = [];
+  FIGHT.active = false; FIGHT.ev = null; FIGHT.sparks = []; FIGHT.snow = [];
   FIGHT.killAt = 0;
   FIGHT.comboPartner = null; FIGHT.partnerImg = null; FIGHT._relaySparked = false; // P1-7
   FX.hpAnim = null;
@@ -355,9 +365,65 @@ function draw() {
     ctx.translate((cv.width - W * TS * s) / 2, cv.height - H * TS * s);
     ctx.scale(s, s);
   }
+  // 地块: 旋转变体消重复 + 程序装饰点缀(2026-10-22 丁工"地图太简陋" → 零素材丰富度方案)
+  const decoRng = (x, y, s) => { const n = Math.sin(x * 127.1 + y * 311.7 + s * 74.7) * 43758.5453; return n - Math.floor(n); };
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const t = TIDX[MAP_LAYOUT[y][x]];
-    ctx.drawImage(tileImg, t * 32, 0, 32, 32, x * TS, y * TS, TS, TS);
+    const key = MAP_LAYOUT[y][x];
+    const t = TIDX[key];
+    const px = x * TS, py = y * TS;
+    const v = (x * 7 + y * 13 + ((x * y) % 5)) % 4;   // 确定性变体 0..3
+    ctx.save();
+    ctx.translate(px + TS / 2, py + TS / 2);
+    if (v === 1) ctx.scale(-1, 1); else if (v === 2) ctx.scale(1, -1); else if (v === 3) ctx.scale(-1, -1);
+    ctx.drawImage(tileImg, t * 32, 0, 32, 32, -TS / 2, -TS / 2, TS, TS);
+    ctx.restore();
+    // 程序装饰层
+    ctx.save();
+    ctx.translate(px, py);
+    if (key === '草地' || key === '平野') {
+      ctx.fillStyle = 'rgba(18,58,22,.38)';
+      for (let i = 0; i < 4; i++) {
+        const rx = decoRng(x, y, i) * (TS - 8) + 2, ry = decoRng(y, x, i + 9) * (TS - 10) + 2;
+        ctx.fillRect(rx, ry, 3, 6); ctx.fillRect(rx + 5, ry + 2, 2, 4);
+      }
+    } else if (key === '雪地') {
+      ctx.fillStyle = 'rgba(255,255,255,.55)';
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(decoRng(x, y, i + 3) * (TS - 10) + 5, decoRng(y, x, i + 5) * (TS - 10) + 5, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (decoRng(x, y, 7) > 0.55) {           // 露出的石尖
+        ctx.fillStyle = 'rgba(90,95,110,.6)';
+        ctx.beginPath();
+        ctx.moveTo(14, 44); ctx.lineTo(24, 30); ctx.lineTo(34, 44); ctx.closePath(); ctx.fill();
+      }
+    } else if (key === '水泽') {
+      ctx.strokeStyle = 'rgba(255,255,255,.38)'; ctx.lineWidth = 2;
+      for (let i = 0; i < 3; i++) {
+        const ry = decoRng(x, y, i + 11) * (TS - 12) + 6;
+        ctx.beginPath();
+        ctx.moveTo(8 + i * 6, ry);
+        ctx.lineTo(8 + i * 6 + 14 + decoRng(y, x, i) * 10, ry);
+        ctx.stroke();
+      }
+    } else if (key === '屋顶') {
+      ctx.strokeStyle = 'rgba(70,22,22,.45)'; ctx.lineWidth = 2;
+      for (const lx of [14, 30, 46]) { ctx.beginPath(); ctx.moveTo(lx, 4); ctx.lineTo(lx, TS - 4); ctx.stroke(); }
+    } else if (key === '城墙' || key === '石板') {
+      ctx.strokeStyle = 'rgba(0,0,0,.28)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(2, 32); ctx.lineTo(TS - 2, 32); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(20, 6); ctx.lineTo(20, 30); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(44, 36); ctx.lineTo(44, 58); ctx.stroke();
+    } else if (key === '竹林') {
+      ctx.fillStyle = 'rgba(12,52,22,.42)';
+      for (let i = 0; i < 2; i++) {
+        ctx.beginPath();
+        ctx.arc(decoRng(x, y, i + 21) * (TS - 12) + 6, decoRng(y, x, i + 17) * (TS - 12) + 6, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
   }
   // 范围高亮
   if (Sel.moveTiles) for (const key in Sel.moveTiles) {
@@ -519,6 +585,96 @@ function draw() {
   requestAnimationFrame(draw);
 }
 
+// ============ FIGHT 背景: 雪夜战场全景(程序绘制, 零素材) ============
+// 2026-10-22 丁工点名"战斗时没有背景画面"。机战式战斗背景 = 全屏环境:
+// 夜空渐变+冷月+远山城影+城墙剪影飘旗+雪粒子飘落。击破定格时 now 冻结, 雪与旗同步定格。
+function drawFightBackdrop(now, CW, CH, outA) {
+  const horizon = CH * 0.60;                       // 地平线(城墙根)
+  // --- 夜空: 雪夜深蓝渐变, 地平线处透一点暖光(远处灯火) ---
+  const sky = ctx.createLinearGradient(0, 0, 0, horizon);
+  sky.addColorStop(0, '#070a1a');
+  sky.addColorStop(0.55, '#101735');
+  sky.addColorStop(0.88, '#252045');
+  sky.addColorStop(1, '#3a2b46');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, CW, horizon);
+  // --- 冷月 + 光晕 ---
+  const mx = CW * 0.76, my = CH * 0.17, mr = 30;
+  const halo = ctx.createRadialGradient(mx, my, mr * 0.4, mx, my, mr * 4.2);
+  halo.addColorStop(0, 'rgba(210,225,255,.34)');
+  halo.addColorStop(0.4, 'rgba(180,200,255,.10)');
+  halo.addColorStop(1, 'rgba(160,190,255,0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(mx - mr * 4.2, my - mr * 4.2, mr * 8.4, mr * 8.4);
+  ctx.fillStyle = '#dfe8fa';
+  ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(160,175,210,.5)';          // 月面暗斑
+  ctx.beginPath(); ctx.arc(mx - 9, my - 4, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(mx + 7, my + 8, 4.5, 0, Math.PI * 2); ctx.fill();
+  // --- 远山两层剪影(大气透视: 越远越亮越蓝) ---
+  const ridge = (baseY, amp, color, seed) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(0, horizon);
+    for (let x = 0; x <= CW; x += 24) {
+      const y = baseY - Math.abs(Math.sin(x * 0.008 + seed)) * amp - Math.sin(x * 0.021 + seed * 2.7) * amp * 0.35;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(CW, horizon);
+    ctx.closePath(); ctx.fill();
+  };
+  ridge(horizon - 46, 74, 'rgba(38,46,86,.75)', 1.7);
+  ridge(horizon - 14, 52, 'rgba(24,30,58,.95)', 4.2);
+  // --- 城墙剪影: 底部主体+顶部城垛+两面飘旗(序章主题: 不该存在的城墙) ---
+  ctx.fillStyle = '#1a1420';
+  ctx.fillRect(0, horizon - 58, CW, 58);
+  for (let x = 8; x < CW; x += 46) ctx.fillRect(x, horizon - 72, 24, 14);   // 城垛
+  ctx.fillStyle = 'rgba(255,190,110,.16)';                                  // 墙上灯火窗洞
+  for (let x = 26; x < CW; x += 92) ctx.fillRect(x, horizon - 40, 7, 10);
+  const flag = (fx, i) => {                    // 飘旗: 旗杆+quadratic 旗面随时间摆动
+    ctx.strokeStyle = '#2c2130'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(fx, horizon - 72); ctx.lineTo(fx, horizon - 128); ctx.stroke();
+    const wave = Math.sin(now / 260 + i * 2.1) * 9;
+    ctx.fillStyle = i % 2 ? '#6e1f24' : '#232c56';
+    ctx.beginPath();
+    ctx.moveTo(fx, horizon - 128);
+    ctx.quadraticCurveTo(fx + 26, horizon - 126 + wave, fx + 50, horizon - 118 + wave * 1.6);
+    ctx.quadraticCurveTo(fx + 26, horizon - 112 + wave, fx, horizon - 104);
+    ctx.closePath(); ctx.fill();
+  };
+  flag(CW * 0.16, 0); flag(CW * 0.58, 1); flag(CW * 0.87, 2);
+  // --- 地面: 雪地, 近深远浅 + 地面微光 ---
+  const gnd = ctx.createLinearGradient(0, horizon, 0, CH);
+  gnd.addColorStop(0, '#3d3a52');
+  gnd.addColorStop(0.35, '#2c2a3e');
+  gnd.addColorStop(1, '#191722');
+  ctx.fillStyle = gnd;
+  ctx.fillRect(0, horizon, CW, CH - horizon);
+  const glow = ctx.createRadialGradient(CW * 0.5, CH * 0.99, 40, CW * 0.5, CH * 0.99, CW * 0.62);
+  glow.addColorStop(0, 'rgba(120,130,190,.13)');
+  glow.addColorStop(1, 'rgba(120,130,190,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, horizon, CW, CH - horizon);
+  ctx.strokeStyle = 'rgba(210,220,255,.07)'; ctx.lineWidth = 2;  // 雪地裂纹
+  for (let i = 0; i < 6; i++) {
+    const yy = horizon + 24 + i * ((CH - horizon) / 7);
+    ctx.beginPath(); ctx.moveTo((i * 257) % CW, yy);
+    ctx.lineTo(((i * 257) % CW) + 130 + i * 40, yy + 4);
+    ctx.stroke();
+  }
+  // --- 雪粒子: FIGHT 开始时初始化, 位置按 now 确定性推进(定格即冻结) ---
+  if (!FIGHT.snow || !FIGHT.snow.length) return;
+  const el = now - FIGHT.t0;
+  ctx.fillStyle = 'rgba(235,242,255,.85)';
+  for (const s of FIGHT.snow) {
+    const y = ((s.y0 + el * s.v) % (CH + 20)) - 10;
+    const x = ((s.x0 + Math.sin(el / 700 + s.ph) * 26 + el * s.drift) % (CW + 20) + CW + 20) % (CW + 20) - 10;
+    ctx.globalAlpha = s.a * outA;
+    ctx.beginPath(); ctx.arc(x, y, s.r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
 // ============ B2: 战斗场景渲染(FIGHT.active 期间由 draw 调) ============
 function drawFightScene(nowReal) {
   const ev = FIGHT.ev;
@@ -533,24 +689,8 @@ function drawFightScene(nowReal) {
   const outA = 1 - win(p, FIGHT.durOut - 200, FIGHT.durOut); // 收势淡出
   const CW = cv.width, CH = cv.height;
 
-  // --- 背景: 战场缩略压暗 + 电影黑边 ---
-  ctx.save();
-  ctx.fillStyle = 'rgba(6,8,20,.92)';
-  ctx.fillRect(0, 0, CW, CH);
-  const s = 0.5, mw = W * TS * s, mh = H * TS * s;
-  ctx.globalAlpha = 0.32 * outA;
-  ctx.translate((CW - mw) / 2, (CH - mh) / 2 + 10);
-  ctx.scale(s, s);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const t = TIDX[MAP_LAYOUT[y][x]];
-    ctx.drawImage(tileImg, t * 32, 0, 32, 32, x * TS, y * TS, TS, TS);
-  }
-  for (const u of G.units) { // 战场上单位也一起缩略显示
-    if (u.hp <= 0) continue;
-    const im = sprites[u.sprite];
-    if (im.complete) ctx.drawImage(im, u.x * TS, u.y * TS, TS, TS);
-  }
-  ctx.restore();
+  // --- 背景: 雪夜战场全景(程序绘制零素材) — 2026-10-22 丁工点名"战斗无背景", 取代旧"缩略图+黑幕" ---
+  drawFightBackdrop(now, CW, CH, outA);
   ctx.save();
   ctx.globalAlpha = outA;
   ctx.fillStyle = '#000';
@@ -590,6 +730,11 @@ function drawFightScene(nowReal) {
   // --- 守方(先画; 落空时叠加2道残影; 受击/侧闪由 puppet 姿态表达) ---
   const defH = FIGHT.defIsPortrait ? PH : 420; // 无立绘角色 sprite 放大到 420
   const defY = standY + (FIGHT.defIsPortrait ? 0 : 100);
+  // 站位脚下阴影(人站在雪地上, 不是飘在背景前; 用 standY 直接算, 攻方阴影不受突进位移影响)
+  ctx.fillStyle = 'rgba(8,8,16,.42)';
+  ctx.beginPath(); ctx.ellipse(defX + defW0 * 0.5, defY + defH + 4, defW0 * 0.46, 14, 0, 0, Math.PI * 2); ctx.fill();
+  const attGroundY = standY + (FIGHT.attIsPortrait ? PH : 100 + 420) + 4;
+  ctx.beginPath(); ctx.ellipse(attX + (FIGHT.attIsPortrait ? 300 : 200), attGroundY, FIGHT.attIsPortrait ? 150 : 190, 14, 0, 0, Math.PI * 2); ctx.fill();
   if (FIGHT.isMiss && hitP > 0 && hitP < 1) {
     drawPuppet(FIGHT.defImg, defX + defShakeX * 0.4, defY, defH, true, 0.22 * outA, defPose);
     drawPuppet(FIGHT.defImg, defX + defShakeX * 0.7, defY, defH, true, 0.12 * outA, defPose);
@@ -598,14 +743,20 @@ function drawFightScene(nowReal) {
   // crit 双影(更强打击感)
   if (!FIGHT.isMiss && crit && hitP > 0.05 && hitP < 0.85)
     drawPuppet(FIGHT.defImg, defX + defShakeX - 16 * recoil, defY + 5, defH, true, 0.30 * (1 - hitP) * outA, defPose);
-  // 受击白闪(落空无; crit 加强)
+  // 受击白闪(落空无; crit 加强): 白色剪影压人——旧 source-atop 写法在新全景背景下会变成一块灰砖, 弃用
   if (!FIGHT.isMiss && hitP > 0 && hitP < 0.5) {
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, (0.5 - hitP) * (crit ? 2.4 : 1.5)) * outA;
-    ctx.globalCompositeOperation = 'source-atop';
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(defX - 30, defY - 30, defW + 80, defH + 60);
-    ctx.restore();
+    const fa = Math.min(1, (0.5 - hitP) * (crit ? 2.4 : 1.5)) * outA;
+    if ('filter' in ctx) {
+      ctx.save();
+      ctx.filter = 'brightness(0) invert(1)';
+      drawPuppet(FIGHT.defImg, defX + defShakeX, defY, defH, true, fa * 0.75, defPose);
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      drawPuppet(FIGHT.defImg, defX + defShakeX, defY, defH, true, fa * 0.4, defPose);
+      ctx.restore();
+    }
   }
 
   // --- 攻方(puppet: 呼吸/下蹲蓄力/前送出招/过冲收招) ---
