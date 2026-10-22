@@ -382,9 +382,11 @@ function draw() {
     ctx.translate(px, py);
     if (key === '草地' || key === '平野') {
       ctx.fillStyle = 'rgba(18,58,22,.38)';
+      // P2-9: 草叶微风 — 整丛草叶按格相位轻摆(幅度<1px, 三帧对比可读)
+      const swayG = Math.sin(now / 420 + x * 1.9 + y * 2.7) * 0.8;
       for (let i = 0; i < 4; i++) {
         const rx = decoRng(x, y, i) * (TS - 8) + 2, ry = decoRng(y, x, i + 9) * (TS - 10) + 2;
-        ctx.fillRect(rx, ry, 3, 6); ctx.fillRect(rx + 5, ry + 2, 2, 4);
+        ctx.fillRect(rx + swayG, ry, 3, 6); ctx.fillRect(rx + 5 + swayG, ry + 2, 2, 4);
       }
     } else if (key === '雪地') {
       ctx.fillStyle = 'rgba(255,255,255,.55)';
@@ -393,20 +395,40 @@ function draw() {
         ctx.arc(decoRng(x, y, i + 3) * (TS - 10) + 5, decoRng(y, x, i + 5) * (TS - 10) + 5, 2.2, 0, Math.PI * 2);
         ctx.fill();
       }
+      // P2-9: 雪面闪光 — 每格一颗冰晶按各自相位明灭, 峰值时十字星光一闪(雪地在呼吸)
+      const twk = 0.5 + 0.5 * Math.sin(now / 300 + (x * 3 + y * 7));
+      const sx = decoRng(x, y, 41) * (TS - 14) + 7, sy = decoRng(y, x, 43) * (TS - 14) + 7;
+      ctx.fillStyle = 'rgba(255,255,255,' + (0.15 + 0.5 * twk).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(sx, sy, 1.6, 0, Math.PI * 2); ctx.fill();
+      if (twk > 0.86) {
+        ctx.strokeStyle = 'rgba(255,255,255,' + ((twk - 0.86) / 0.14 * 0.7).toFixed(3) + ')';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(sx - 5, sy); ctx.lineTo(sx + 5, sy);
+        ctx.moveTo(sx, sy - 5); ctx.lineTo(sx, sy + 5); ctx.stroke();
+      }
       if (decoRng(x, y, 7) > 0.55) {           // 露出的石尖
         ctx.fillStyle = 'rgba(90,95,110,.6)';
         ctx.beginPath();
         ctx.moveTo(14, 44); ctx.lineTo(24, 30); ctx.lineTo(34, 44); ctx.closePath(); ctx.fill();
       }
     } else if (key === '水泽') {
-      ctx.strokeStyle = 'rgba(255,255,255,.38)'; ctx.lineWidth = 2;
+      // P2-9: 水波微动效 — 三条波线各自相位明暗 + 一条流动波光(机战地图水面的活气)
+      const wp = now / 1000;
+      ctx.lineWidth = 2;
       for (let i = 0; i < 3; i++) {
         const ry = decoRng(x, y, i + 11) * (TS - 12) + 6;
+        const shimmer = 0.5 + 0.5 * Math.sin(wp * 1.6 + x * 1.7 + y * 2.3 + i * 2.1);
+        ctx.strokeStyle = 'rgba(255,255,255,' + (0.14 + 0.3 * shimmer).toFixed(3) + ')';
         ctx.beginPath();
         ctx.moveTo(8 + i * 6, ry);
         ctx.lineTo(8 + i * 6 + 14 + decoRng(y, x, i) * 10, ry);
         ctx.stroke();
       }
+      const drift = (wp * 0.25 + decoRng(x, y, 31)) % 1;  // 亮斑左→右漂流, ~4s 一周, 每格相位错开
+      ctx.strokeStyle = 'rgba(255,255,255,' + (0.35 * Math.sin(drift * Math.PI)).toFixed(3) + ')';
+      ctx.lineWidth = 2.5;
+      const gx = 6 + drift * (TS - 16), gy = decoRng(x, y, 13) * (TS - 14) + 7;
+      ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(gx + 10, gy); ctx.stroke();
     } else if (key === '屋顶') {
       ctx.strokeStyle = 'rgba(70,22,22,.45)'; ctx.lineWidth = 2;
       for (const lx of [14, 30, 46]) { ctx.beginPath(); ctx.moveTo(lx, 4); ctx.lineTo(lx, TS - 4); ctx.stroke(); }
@@ -417,35 +439,45 @@ function draw() {
       ctx.beginPath(); ctx.moveTo(44, 36); ctx.lineTo(44, 58); ctx.stroke();
     } else if (key === '竹林') {
       ctx.fillStyle = 'rgba(12,52,22,.42)';
+      // P2-9: 竹影轻摇 — 两团竹影随正弦微偏移(风过竹林, 与草叶同频不同相)
+      const swayB = Math.sin(now / 500 + x * 2.1 + y * 1.3) * 1.6;
       for (let i = 0; i < 2; i++) {
         ctx.beginPath();
-        ctx.arc(decoRng(x, y, i + 21) * (TS - 12) + 6, decoRng(y, x, i + 17) * (TS - 12) + 6, 3, 0, Math.PI * 2);
+        ctx.arc(decoRng(x, y, i + 21) * (TS - 12) + 6 + swayB, decoRng(y, x, i + 17) * (TS - 12) + 6, 3, 0, Math.PI * 2);
         ctx.fill();
       }
     }
     ctx.restore();
   }
   // 范围高亮
+  // P2-9: 范围呼吸 — 选中范围按正弦整体明灭(240ms 相位), 光标感从"油漆"变"活气"
+  const hb = 0.5 + 0.5 * Math.sin(now / 240);
   if (Sel.moveTiles) for (const key in Sel.moveTiles) {
     const [x, y] = key.split(',').map(Number);
-    ctx.fillStyle = 'rgba(60,140,255,.28)';
+    ctx.fillStyle = 'rgba(60,140,255,' + (0.20 + 0.12 * hb).toFixed(3) + ')';
     ctx.fillRect(x * TS, y * TS, TS, TS);
-    ctx.strokeStyle = 'rgba(90,160,255,.9)'; ctx.strokeRect(x * TS + 2, y * TS + 2, TS - 4, TS - 4);
+    ctx.strokeStyle = 'rgba(90,160,255,' + (0.65 + 0.3 * hb).toFixed(3) + ')';
+    ctx.strokeRect(x * TS + 2, y * TS + 2, TS - 4, TS - 4);
   }
   if (Sel.atkTiles) for (const key in Sel.atkTiles) {
     const [x, y] = key.split(',').map(Number);
-    ctx.fillStyle = 'rgba(255,70,60,.25)';
+    ctx.fillStyle = 'rgba(255,70,60,' + (0.18 + 0.11 * hb).toFixed(3) + ')';
     ctx.fillRect(x * TS, y * TS, TS, TS);
-    ctx.strokeStyle = 'rgba(255,110,90,.9)'; ctx.strokeRect(x * TS + 2, y * TS + 2, TS - 4, TS - 4);
+    ctx.strokeStyle = 'rgba(255,110,90,' + (0.60 + 0.32 * hb).toFixed(3) + ')';
+    ctx.strokeRect(x * TS + 2, y * TS + 2, TS - 4, TS - 4);
   }
   if (Sel.comboTiles) for (const key in Sel.comboTiles) {
     const [x, y] = key.split(',').map(Number);
-    ctx.fillStyle = 'rgba(255,210,60,.3)';
+    ctx.fillStyle = 'rgba(255,210,60,' + (0.22 + 0.14 * hb).toFixed(3) + ')';
     ctx.fillRect(x * TS, y * TS, TS, TS);
-    ctx.strokeStyle = 'rgba(255,220,90,.95)'; ctx.strokeRect(x * TS + 2, y * TS + 2, TS - 4, TS - 4);
+    ctx.strokeStyle = 'rgba(255,220,90,' + (0.70 + 0.28 * hb).toFixed(3) + ')';
+    ctx.strokeRect(x * TS + 2, y * TS + 2, TS - 4, TS - 4);
   }
   // 单位
   const t = performance.now() / 300;
+  // P2-10: 单位占比 64→78px — FE/SRW 惯例: 人物略溢格边才有战场体积感。
+  // 脚底锚定(底部对齐格底-2), 头顶自然探入上一格; 框/HP条仍按格子画(格子标记≠人物轮廓)
+  const US = 78;
   for (const u of G.units) {
     if (u.hp <= 0) continue;
     const bob = Math.sin(t + u.id) * 1.5;
@@ -455,10 +487,18 @@ function draw() {
       ctx.strokeRect(u.x * TS + 3, u.y * TS + 3, TS - 6, TS - 6);
     }
     if (Sel.unit === u) {
+      // P2-9: 选中呼吸 — 外圈金光按正弦明灭(200ms 相位), 选中态是活的不是油漆框
+      const pulse = 0.55 + 0.45 * Math.sin(now / 200);
+      ctx.save();
+      ctx.globalAlpha = pulse * 0.55;
+      ctx.strokeStyle = '#fff8c0'; ctx.lineWidth = 6;
+      ctx.strokeRect(u.x * TS + 2, u.y * TS + 2, TS - 4, TS - 4);
+      ctx.restore();
       ctx.strokeStyle = '#ffe070'; ctx.lineWidth = 3;
       ctx.strokeRect(u.x * TS + 2, u.y * TS + 2, TS - 4, TS - 4);
     }
-    if (im.complete) ctx.drawImage(im, u.x * TS, u.y * TS + bob, TS, TS);
+    if (im.complete)
+      ctx.drawImage(im, u.x * TS + (TS - US) / 2, u.y * TS + TS - US - 2 + bob, US, US);
     // HP 条 + 气势
     const bw = TS - 10;
     // B1 演出期间: 条与数字都走逐格动画的当前值, 演出关闭时直接用真实值
