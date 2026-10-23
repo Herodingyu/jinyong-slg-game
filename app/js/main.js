@@ -85,6 +85,235 @@ function drawIntroPulses(now) {
 // 窗口进度: p 在 [a,b] 间的归一化位置(0→1)
 function win(p, a, b) { return Math.max(0, Math.min(1, (p - a) / (b - a))); }
 
+// ============ P3-11a: 剧情演出系统(机战式第一话标配: 章节标题卡→立绘对白→出击画面) ============
+// 三段皆为战前序章流程, 由 playStory() 顺序驱动; 演出开关关闭时整体跳过(尊重演出开关)。
+// 标题卡单独立起(AUDIT#24: 先压住镜头再让扫场与对白同播, 开场 0.6s 空窗被填掉)。
+const TITLE = { active: false, t0: 0, dur: 2600 };
+const DLG = { active: false, idx: 0, t0: 0, chars: 0, done: false, spKey: '', spT0: 0 };
+const SORTIE = { active: false, t0: 0, dur: 2600 };
+let inputPulse = 0; // 点击/空格脉冲计数: 演出驱动按脉冲差推进(与选中/攻击输入完全隔离)
+
+// 章节标题卡: 黑底 + 作品名小字 + 章序红印 + 章名大字左→右擦拭 + 金漆 Brush 线; 点击可跳
+function drawTitleCard(now) {
+  const p = now - TITLE.t0;
+  const fade = 1 - win(p, TITLE.dur - 500, TITLE.dur);   // 末尾500ms淡出, 露出背后扫场
+  if (fade <= 0) { TITLE.active = false; return; }
+  const CX = cv.width / 2;
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.globalAlpha = fade;
+  ctx.fillStyle = '#060609';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  // 顶部小字: 作品名
+  ctx.globalAlpha = fade * win(p, 0, 500);
+  ctx.font = '20px "KaiTi","STKaiti","Microsoft YaHei",serif';
+  ctx.fillStyle = '#8a7a58';
+  ctx.fillText('金 庸 群 侠 大 战', CX, cv.height * 0.20);
+  // 章序(红印式)
+  ctx.globalAlpha = fade * win(p, 350, 800);
+  ctx.font = 'bold 30px "KaiTi","STKaiti","Microsoft YaHei",serif';
+  ctx.fillStyle = '#c8402f';
+  ctx.fillText('◆ ' + STORY.chapterNo + ' ◆', CX, cv.height * 0.335);
+  // 章名大字: 左→右擦拭(毛笔开卷感), 金漆线随擦拭拖出
+  const rw = win(p, 550, 1500);
+  ctx.font = 'bold 92px "KaiTi","STKaiti","Microsoft YaHei",serif';
+  const title = STORY.chapterTitle;
+  const tw = ctx.measureText(title).width;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(CX - tw / 2 - 10, cv.height * 0.36, (tw + 20) * rw, cv.height * 0.30);
+  ctx.clip();
+  ctx.fillStyle = '#f3e9cf';
+  ctx.fillText(title, CX, cv.height * 0.51);
+  ctx.restore();
+  ctx.globalAlpha = fade * rw;
+  ctx.fillStyle = '#c8a04a';
+  ctx.fillRect(CX - tw / 2 - 10, cv.height * 0.635, (tw + 20) * rw, 4);
+  // 跳过提示
+  ctx.globalAlpha = fade * win(p, 1200, 1700) * 0.6;
+  ctx.font = '15px "KaiTi","STKaiti","Microsoft YaHei",serif';
+  ctx.fillStyle = '#9a8f78';
+  ctx.fillText('点击 跳过 ▸', CX, cv.height * 0.86);
+  ctx.restore();
+}
+
+// 立绘对白框: 底部机战式窗口 — 左侧半身立绘(无立绘角色放大 sprite 回退), 名牌, 打字机正文
+// 首击补全本句, 再击翻页; 正文按字宽贪心换行, ▼ 呼吸提示翻页
+function drawDialogBox(now) {
+  const line = STORY.opening[DLG.idx];
+  if (!line) return;
+  if (!DLG.done) {
+    DLG.chars = Math.min(line.text.length, Math.floor((now - DLG.t0) / 42)); // 打字机 42ms/字
+    if (DLG.chars >= line.text.length) DLG.done = true;
+  }
+  const bx = 16, bw = cv.width - 32, bh = 150, by = cv.height - bh - 12;
+  // 面板底+金边
+  ctx.save();
+  ctx.fillStyle = 'rgba(7,9,18,.94)';
+  roundRectPath(bx, by, bw, bh, 8); ctx.fill();
+  ctx.strokeStyle = '#c8a860'; ctx.lineWidth = 2;
+  roundRectPath(bx, by, bw, bh, 8); ctx.stroke();
+  // ---- 立绘(128px 底对齐, 半身 cover 取景; 换说话时滑入) ----
+  const pim = portraits[line.sp];
+  const hasP = pim && pim.complete && pim.naturalWidth > 0;
+  const img = hasP ? pim : sprites[line.sp];
+  if (DLG.spKey !== line.sp) { DLG.spKey = line.sp; DLG.spT0 = now; }
+  const slide = win(now, DLG.spT0, DLG.spT0 + 190);
+  const dh = 128, dyy = by + bh - 8 - dh;
+  const dx = bx + 14 - (1 - (1 - Math.pow(1 - slide, 3))) * 64;
+  ctx.save();
+  ctx.globalAlpha = slide;
+  ctx.fillStyle = '#14141f';
+  ctx.fillRect(bx + 10, dyy - 2, 128, dh + 4);
+  if (hasP) {
+    // 半身取景: 源图取顶部58%(头+胸), cover 进 128px 宽框
+    drawCover(img, 0.58, dx, dyy, 128, dh);
+  } else {
+    ctx.imageSmoothingEnabled = false; // 像素小人保持颗粒感
+    ctx.drawImage(img, dx + 22, dyy + 12, 104, 104);
+    ctx.imageSmoothingEnabled = true;
+  }
+  ctx.restore();
+  // ---- 名牌(压面板顶边) ----
+  const name = line.name || CHAR_DATA[line.sp].cn;
+  ctx.font = 'bold 19px "KaiTi","STKaiti","Microsoft YaHei",serif';
+  const nw = ctx.measureText(name).width + 24;
+  ctx.fillStyle = '#1a1408';
+  roundRectPath(bx + 30, by - 14, nw, 28, 6); ctx.fill();
+  ctx.strokeStyle = '#c8a860'; ctx.lineWidth = 1.5;
+  roundRectPath(bx + 30, by - 14, nw, 28, 6); ctx.stroke();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd98a';
+  ctx.fillText(name, bx + 42, by + 1);
+  // ---- 打字机正文(贪心按字宽换行, 最多三行) ----
+  const revealed = line.text.slice(0, DLG.chars);
+  const tx0 = bx + 162, maxW = bw - 162 - 22;
+  ctx.font = '21px "KaiTi","STKaiti","Microsoft YaHei",serif';
+  const rows = [];
+  let cur = '';
+  for (const ch of revealed) {
+    if (ctx.measureText(cur + ch).width > maxW) { rows.push(cur); cur = ch; }
+    else cur += ch;
+  }
+  rows.push(cur);
+  ctx.fillStyle = '#f5ecd7';
+  rows.slice(0, 3).forEach((r, i) => ctx.fillText(r, tx0, by + 44 + i * 34));
+  // ▼ 翻页提示(呼吸闪烁)
+  if (DLG.done) {
+    ctx.globalAlpha = 0.45 + 0.45 * Math.sin(now / 160);
+    ctx.fillStyle = '#ffd98a';
+    ctx.font = '18px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('▼', bx + bw - 20, by + bh - 20);
+  }
+  ctx.restore();
+}
+
+// 出击画面: 深蓝底+斜光带扫过, 我方名册依次滑入(立绘半身头像+名+兵器), 右侧金漆「出击！」爆字收场
+function drawSortie(now) {
+  const p = now - SORTIE.t0;
+  const CX = cv.width / 2;
+  // 底: 深夜蓝渐变(出击前的肃杀感)
+  const g = ctx.createLinearGradient(0, 0, 0, cv.height);
+  g.addColorStop(0, '#0a1030'); g.addColorStop(0.6, '#0d1440'); g.addColorStop(1, '#070a20');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  // 斜向光带缓慢扫过
+  const sx = -300 + win(p, 0, SORTIE.dur) * (cv.width + 600);
+  ctx.save();
+  ctx.translate(sx, 0); ctx.rotate(-0.35);
+  const band = ctx.createLinearGradient(0, 0, 190, 0);
+  band.addColorStop(0, 'rgba(255,240,200,0)');
+  band.addColorStop(0.5, 'rgba(255,240,200,.10)');
+  band.addColorStop(1, 'rgba(255,240,200,0)');
+  ctx.fillStyle = band;
+  ctx.fillRect(0, -260, 190, cv.height + 520);
+  ctx.restore();
+  // 顶部章节标注
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.globalAlpha = 0.8;
+  ctx.font = '19px "KaiTi","STKaiti","Microsoft YaHei",serif';
+  ctx.fillStyle = '#8a94c8';
+  ctx.fillText(STORY.chapterNo.replace(/\s/g, '') + ' · ' + STORY.chapterTitle + ' —— 出 击', CX, 40);
+  ctx.restore();
+  // 名册: 我方单位依次滑入
+  const roster = G.units.filter(u => u.side === 'player');
+  roster.forEach((u, i) => {
+    const lp = win(p, 260 + i * 210, 560 + i * 210);
+    if (lp <= 0) return;
+    const ease = 1 - Math.pow(1 - lp, 3);
+    const y = 118 + i * 94;
+    const x = 84 - (1 - ease) * 320;
+    ctx.save();
+    ctx.globalAlpha = lp;
+    ctx.fillStyle = 'rgba(10,12,26,.85)';
+    roundRectPath(x, y, 400, 78, 6); ctx.fill();
+    ctx.strokeStyle = '#3a4670'; ctx.lineWidth = 1.5;
+    roundRectPath(x, y, 400, 78, 6); ctx.stroke();
+    // 头像: 立绘半身 cover 取景, 无立绘用 sprite 回退(像素颗粒保留)
+    const pim = portraits[u.sprite];
+    const hasP = pim && pim.complete && pim.naturalWidth > 0;
+    if (hasP) drawCover(pim, 0.5, x + 8, y + 7, 54, 64);
+    else {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(sprites[u.sprite], x + 3, y + 7, 64, 64);
+      ctx.imageSmoothingEnabled = true;
+    }
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.font = 'bold 22px "KaiTi","STKaiti","Microsoft YaHei",serif';
+    ctx.fillStyle = '#ffe9b0';
+    ctx.fillText(u.cn, x + 76, y + 30);
+    ctx.font = '15px "KaiTi","STKaiti","Microsoft YaHei",serif';
+    ctx.fillStyle = '#9aa4c8';
+    ctx.fillText(u.weapons.map(w => WEAPONS[w].name).join(' · '), x + 76, y + 57);
+    ctx.restore();
+  });
+  // 「出击！」大字: 名册铺完后爆字(过冲回弹), 金漆待遇
+  const pop0 = 300 + roster.length * 210;
+  const pop = win(p, pop0, pop0 + 480);
+  if (pop > 0) {
+    const scale = 0.62 + 0.38 * easeOutBack(Math.min(1, pop * 2.4));
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, pop * 2.6);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = 'bold ' + Math.round(96 * scale) + 'px "KaiTi","STKaiti","Microsoft YaHei",serif';
+    const ox = cv.width * 0.72, oy = cv.height * 0.52;
+    ctx.lineWidth = 14; ctx.strokeStyle = '#3a2408';
+    ctx.strokeText('出 击 ！', ox, oy);
+    ctx.fillStyle = '#ffd24a';
+    ctx.fillText('出 击 ！', ox, oy);
+    // 两侧速度线(程序绘制, 爆字瞬间拉出)
+    ctx.globalAlpha *= 0.5;
+    ctx.strokeStyle = '#ffe9b0'; ctx.lineWidth = 3;
+    for (let i = 0; i < 5; i++) {
+      const yy = oy - 90 + i * 44;
+      const ext = win(pop, 0.15, 0.9) * 120;
+      ctx.beginPath(); ctx.moveTo(ox - 210 - ext, yy); ctx.lineTo(ox - 150, yy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ox + 210 + ext, yy); ctx.lineTo(ox + 150, yy); ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+// cover 式取景: 源图取顶部 sClipH 比例(半身), 等比放大填满目标框, 居中裁边
+function drawCover(im, sClipH, dx, dy, dw, dh) {
+  const sw = im.width, sh = im.height * sClipH;
+  const sc = Math.max(dw / sw, dh / sh);
+  const cw = dw / sc, ch = dh / sc;
+  ctx.drawImage(im, (sw - cw) / 2, 0, cw, ch, dx, dy, dw, dh);
+}
+// 圆角矩形路径(不依赖 ctx.roundRect, 兼容旧内核)
+function roundRectPath(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
 // ============ P1-9: 立绘 puppet 分层动画(伪骨骼) ============
 // 丁工 10-20 点名"人物不会动": 机战A 是逐帧动作, 零新素材下把立绘按头/躯干/腿三层切分，
 // 每层独立变换逼近"这个人在出招/在挨打"。切分比例做成常量, 个别立绘姿势差异可在此微调。
@@ -622,6 +851,10 @@ function draw() {
       ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
     }
   }
+  // P3-11a: 剧情演出覆盖层(标题卡/对白框/出击画面, 战前序章专属; 与 FIGHT 互斥不同时)
+  if (TITLE.active) drawTitleCard(now);
+  if (DLG.active) drawDialogBox(now);
+  if (SORTIE.active) drawSortie(now);
   requestAnimationFrame(draw);
 }
 
@@ -1403,6 +1636,8 @@ function floatText(u, text, color) {
 const SPIRIT_COLOR = { mustHit:'#6cf0ff', dmg2:'#ff6050', evade:'#8fd08f',
                        halfDmg:'#e8c85a', willUp:'#d0a0ff', capture:'#c89aff', mov3:'#7fd0ff' };
 function seSpirit() { beep(392, .1, 'sine', .06); setTimeout(() => beep(523, .12, 'sine', .06), 90); setTimeout(() => beep(659, .16, 'sine', .05), 180); }
+// P3-11a: 出击号角(简易上行三音, 出战前的仪式感)
+function seSortie() { beep(262, .14, 'square', .07); setTimeout(() => beep(392, .14, 'square', .07), 130); setTimeout(() => beep(523, .3, 'square', .08), 260); }
 // 运功演出: buff名大字(立绘切入, 无立绘居中出字)+角色色光环+头顶小字
 async function spiritFx(u, s) {
   if (!fxOn) return;
@@ -1560,6 +1795,8 @@ cv.addEventListener('mousemove', e => {
 cv.addEventListener('mouseleave', () => { mouse.x = -1; });
 
 cv.addEventListener('click', async () => {
+  // P3-11a: 剧情演出期间点击=推进(补全/翻页/跳段), 不吃成选中
+  if (TITLE.active || DLG.active || SORTIE.active) { inputPulse++; return; }
   // P1-10: 演出期间点击=跳过(最优先; 敌方回合演出也能跳)
   if (FIGHT.active) { FIGHT.skip = true; return; }
   // P1-8: 开场镜头进行中点击 = 直接收场(不吃掉这次点击做选中)
@@ -1615,7 +1852,8 @@ cv.addEventListener('click', async () => {
 
 document.getElementById('endTurn').onclick = () => {
   if (G.phase !== 'player' || G.over) return;
-  if (INTRO.active) return; // P1-8: 开场镜头期间不吃结束回合(避免镜头与敌方回合叠加)
+  // P1-8/P3-11a: 开场镜头与剧情演出期间不吃结束回合(避免流程叠加)
+  if (INTRO.active || TITLE.active || DLG.active || SORTIE.active) return;
   Sel.unit = null; Sel.moveTiles = null; hideMenus(); showInfo(null);
   G.units.filter(v => v.side === 'player').forEach(v => v.acted = true);
   enemyPhase();
@@ -1636,14 +1874,70 @@ document.getElementById('counterBtn').onclick = e => {
 document.getElementById('helpBtn').onclick = () => {
   alert('操作:\n点击我方单位 -> 点蓝格移动 -> 在菜单选指令\n攻击: 选武功(看命中/伤害预测) -> 点黄圈内的敌人\n运功: 耗真气发动(凝神必中/热血×2/游身闪避...)\n韦小宝邻接残血辽将 -> 说得收服\n萧峰郭靖相邻且气势≥120 -> 合体技「双侠镇襄阳」\n敌方回合可反击(选武功或硬吃攒气势)\n胜利条件: 击破段延庆');
 };
+// 空格/回车也可推进剧情(与点击同权; 测试台 window 无 addEventListener, 防御式注册)
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('keydown', e => {
+    if ((e.code === 'Space' || e.code === 'Enter') && (TITLE.active || DLG.active || SORTIE.active)) {
+      e.preventDefault();
+      inputPulse++;
+    }
+  });
+}
 document.getElementById('startBtn').onclick = () => {
   document.getElementById('intro').classList.add('hidden');
-  banner('第 1 回合 · 我方行动', 1200);
-  // P1-8: 开场镜头调度(演出关则直接跳过, 尊重演出开关)
-  if (fxOn) { INTRO.active = true; INTRO.t0 = performance.now(); }
+  playStory(); // P3-11a: 标题卡→立绘对白→出击画面→开战(演出关则直接开战)
 };
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ============ P3-11a: 剧情演出驱动 ============
+// 顺序: 标题卡(2.6s) → 镜头扫场与对白同播(点击/空格逐句) → 出击画面 → 开战横幅
+// 任何阶段演出开关被关 => 立即收尾直接开战(尊重演出开关, 不锁死玩家)
+async function playStory() {
+  if (!fxOn) { beginPlay(); return; }
+  TITLE.active = true; TITLE.t0 = performance.now();
+  await waitPulseOr(TITLE.dur);
+  TITLE.active = false;
+  if (!fxOn) { beginPlay(); return; }
+  // 扫场与对白同播(AUDIT#24: 标题卡垫场后, 镜头 0.6s 空窗已被填掉)
+  INTRO.active = true; INTRO.t0 = performance.now();
+  DLG.active = true;
+  for (let i = 0; i < STORY.opening.length; i++) {
+    DLG.idx = i; DLG.t0 = performance.now(); DLG.chars = 0; DLG.done = false;
+    await playLine();
+    if (!fxOn) break;
+  }
+  DLG.active = false;
+  if (fxOn) {
+    SORTIE.active = true; SORTIE.t0 = performance.now();
+    seSortie();
+    await waitPulseOr(SORTIE.dur);
+    SORTIE.active = false;
+  }
+  beginPlay();
+}
+
+function beginPlay() {
+  INTRO.active = false; // 对白比扫场长时, 开战即收镜头
+  banner('第 1 回合 · 我方行动', 1200);
+}
+
+// 等一个输入脉冲(点击/空格)或超时自动收场(标题卡/出击用)
+async function waitPulseOr(ms) {
+  const p0 = inputPulse, t0 = performance.now();
+  while (inputPulse === p0 && performance.now() - t0 < ms) await sleep(60);
+}
+
+// 单句对白: 打字机播字(首击=整句补全), 播完后再等一个脉冲翻页
+async function playLine() {
+  const line = STORY.opening[DLG.idx];
+  let p0 = inputPulse;
+  while (!DLG.done && fxOn) {
+    await sleep(50);
+    if (inputPulse !== p0) { p0 = inputPulse; DLG.chars = line.text.length; DLG.done = true; }
+  }
+  while (inputPulse === p0 && fxOn) await sleep(60);
+}
 
 // ---------- 初始化 ----------
 G.units = INITIAL_UNITS.map(makeUnit);
