@@ -27,7 +27,7 @@ const FX = { portrait: null, bigText: '', bigCrit: false,
 // ============ B2: 机战式横版战斗场景 ============
 // 攻击确认后切入: 战场压暗为背景+电影黑边, 攻方立绘左/守方立绘右(守方镜像),
 // 每把武功按 data.js 的 anim 配置演出独立动作(蓄力→出招→命中→收势), 全程程序动画零素材依赖。
-const FT = { enter: 360, charge: 700, strike: 1030, hit: 1500, out: 1740 }; // 时间轴(ms), 会心整体+240
+const FT = { enter: 360, charge: 700, strike: 1030, hit: 1500, out: 2080 }; // 时间轴(ms), 会心整体+240; P1-11: out 1740→2080, 守方退场+攻方独占收势要可读(旧淡出把退场吃了)
 const FIGHT = { active: false, ev: null, t0: 0, crit: false, isMiss: false, sparks: [],
                 attImg: null, defImg: null, attIsPortrait: false, defIsPortrait: false,
                 weaponName: '', animKind: 'dash', animColor: '#ffb84a', durOut: FT.out,
@@ -970,7 +970,7 @@ function drawFightScene(nowReal) {
   ctx.fillRect(0, 0, CW, 54);            // 上黑边
   ctx.fillRect(0, CH - 44, CW, 44);      // 下黑边
 
-  // --- 站位: 攻左守右, 守方镜像面向攻方 ---
+  // --- 站位: P1-11 机战式出招流程(丁工10-23点名) — 发招期攻方独占, 命中帧守方才登场, 受击完毕退场收势 ---
   const enter = win(p, 0, FT.enter);
   const ease = 1 - Math.pow(1 - enter, 3);
   const PH = 470;                              // 立绘高度(缩小拉开对峙距离)
@@ -979,7 +979,26 @@ function drawFightScene(nowReal) {
   const attX = -380 + ease * (attRestX + 380);
   const defW0 = FIGHT.defIsPortrait ? PH * (FIGHT.defImg.width / FIGHT.defImg.height) : 400;
   const defRestX = CW - 96 - defW0;
-  const defX = CW + 60 - ease * (CW + 60 - defRestX);
+  // 攻方独占镜头位: 蓄力期推近(放大1.16x+向画面中央偏移), 命中帧切回双人对峙位
+  const soloP = win(p, FT.enter + 80, tStrike - 120) * (1 - win(p, tStrike - 120, tStrike + 30));
+  const attScale = 1 + 0.16 * soloP;
+  const attDX = 132 * soloP;
+  // 守方登场: 击打瞬间才入场(受击姿态+白闪遮住入画点), 之前完全不在画面
+  const defEnterP = win(p, tStrike - 80, tStrike + 40);            // 登场进度(命中前80ms起滑入)
+  const defSlideIn = Math.pow(1 - defEnterP, 3) * 300;             // 从右屏外被"打入"画面(ease-out)
+  let defExit = 0, defAlpha = win(p, tStrike - 80, tStrike - 10);  // 入画淡入极快(60ms)
+  let defSink = 0;                                                 // 击破: 倒下沉降
+  if (ev.killed) {
+    // 击破: 定格期必须在场(冻结帧), 击破大字播放时倒下退场
+    if (p >= killAt + 500) defSink = win(p, killAt + 500, killAt + 950) * 44;
+    defAlpha *= 1 - win(p, killAt + 520, killAt + 980);
+  } else {
+    // 受击完毕退场收势: 峰值落定后稍驻留, 随即向右离场(攻方独占收势)
+    defExit = win(p, tStrike + 560, tStrike + 900) * 190;
+    defAlpha *= 1 - win(p, tStrike + 700, tStrike + 1000);
+  }
+  const defX = defRestX + defSlideIn + defExit;
+  const defW = (FIGHT.defIsPortrait ? PH : 420) * (FIGHT.defImg.width / FIGHT.defImg.height); // 与 drawPuppet 返回宽一致(FX 端点用)
   // P1-9: 受击后仰进度(守方 puppet 姿态驱动); 击破定格期间姿态锁在峰值帧
   const hitP = win(p, tStrike, tStrike + 430);
   const recoil = (hitP > 0 && hitP < 1) ? Math.sin(hitP * Math.PI) : 0;
@@ -1000,48 +1019,56 @@ function drawFightScene(nowReal) {
   const defPose = fightDefPose(p, now, tStrike, FIGHT.isMiss, crit, freezeHit, FIGHT.defIsPortrait);
   defPose.whole = !FIGHT.defIsPortrait;
 
-  // --- 守方(先画; 落空时叠加2道残影; 受击/侧闪由 puppet 姿态表达) ---
+  // --- 守方(P1-11: 只在登场~退场窗口内绘制; 落空残影/受击/侧闪由 puppet 姿态表达) ---
   const defH = FIGHT.defIsPortrait ? PH : 420; // 无立绘角色 sprite 放大到 420
-  const defY = standY + (FIGHT.defIsPortrait ? 0 : 100);
-  // 站位脚下阴影(人站在雪地上, 不是飘在背景前; 用 standY 直接算, 攻方阴影不受突进位移影响)
-  ctx.fillStyle = 'rgba(8,8,16,.42)';
-  ctx.beginPath(); ctx.ellipse(defX + defW0 * 0.5, defY + defH + 4, defW0 * 0.46, 14, 0, 0, Math.PI * 2); ctx.fill();
-  const attGroundY = standY + (FIGHT.attIsPortrait ? PH : 100 + 420) + 4;
-  ctx.beginPath(); ctx.ellipse(attX + (FIGHT.attIsPortrait ? 300 : 200), attGroundY, FIGHT.attIsPortrait ? 150 : 190, 14, 0, 0, Math.PI * 2); ctx.fill();
-  if (FIGHT.isMiss && hitP > 0 && hitP < 1) {
-    drawPuppet(FIGHT.defImg, defX + defShakeX * 0.4, defY, defH, true, 0.22 * outA, defPose);
-    drawPuppet(FIGHT.defImg, defX + defShakeX * 0.7, defY, defH, true, 0.12 * outA, defPose);
+  const defY = standY + (FIGHT.defIsPortrait ? 0 : 100) + defSink;
+  // 站位脚下阴影(人站在雪地上, 不是飘在背景前)
+  if (defAlpha > 0.01) {
+    ctx.fillStyle = 'rgba(8,8,16,.42)';
+    ctx.beginPath(); ctx.ellipse(defX + defW0 * 0.5, defY + defH + 4, defW0 * 0.46, 14, 0, 0, Math.PI * 2); ctx.fill();
   }
-  const defW = drawPuppet(FIGHT.defImg, defX + defShakeX, defY, defH, true, outA, defPose);
-  // crit 双影(更强打击感)
-  if (!FIGHT.isMiss && crit && hitP > 0.05 && hitP < 0.85)
-    drawPuppet(FIGHT.defImg, defX + defShakeX - 16 * recoil, defY + 5, defH, true, 0.30 * (1 - hitP) * outA, defPose);
-  // 受击白闪(落空无; crit 加强): 白色剪影压人——旧 source-atop 写法在新全景背景下会变成一块灰砖, 弃用
-  if (!FIGHT.isMiss && hitP > 0 && hitP < 0.5) {
-    const fa = Math.min(1, (0.5 - hitP) * (crit ? 2.4 : 1.5)) * outA;
-    if ('filter' in ctx) {
-      ctx.save();
-      ctx.filter = 'brightness(0) invert(1)';
-      drawPuppet(FIGHT.defImg, defX + defShakeX, defY, defH, true, fa * 0.75, defPose);
-      ctx.restore();
-    } else {
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      drawPuppet(FIGHT.defImg, defX + defShakeX, defY, defH, true, fa * 0.4, defPose);
-      ctx.restore();
+  // 攻方脚下阴影(独占推近期同步放大移位; 不受突进位移影响)
+  const attGroundY = standY + (FIGHT.attIsPortrait ? PH : 100 + 420) + 4;
+  ctx.fillStyle = 'rgba(8,8,16,.42)';
+  ctx.beginPath(); ctx.ellipse(attX + attDX + (FIGHT.attIsPortrait ? 300 : 200) * attScale, attGroundY,
+    (FIGHT.attIsPortrait ? 150 : 190) * (0.7 + 0.3 * attScale), 14, 0, 0, Math.PI * 2); ctx.fill();
+  if (defAlpha > 0.01) {
+    if (FIGHT.isMiss && hitP > 0 && hitP < 1) {
+      drawPuppet(FIGHT.defImg, defX + defShakeX * 0.4, defY, defH, true, 0.22 * outA * defAlpha, defPose);
+      drawPuppet(FIGHT.defImg, defX + defShakeX * 0.7, defY, defH, true, 0.12 * outA * defAlpha, defPose);
+    }
+    drawPuppet(FIGHT.defImg, defX + defShakeX, defY, defH, true, outA * defAlpha, defPose);
+    // crit 双影(更强打击感)
+    if (!FIGHT.isMiss && crit && hitP > 0.05 && hitP < 0.85)
+      drawPuppet(FIGHT.defImg, defX + defShakeX - 16 * recoil, defY + 5, defH, true, 0.30 * (1 - hitP) * outA * defAlpha, defPose);
+    // 受击白闪(落空无; crit 加强): 白色剪影压人
+    if (!FIGHT.isMiss && hitP > 0 && hitP < 0.5) {
+      const fa = Math.min(1, (0.5 - hitP) * (crit ? 2.4 : 1.5)) * outA * defAlpha;
+      if ('filter' in ctx) {
+        ctx.save();
+        ctx.filter = 'brightness(0) invert(1)';
+        drawPuppet(FIGHT.defImg, defX + defShakeX, defY, defH, true, fa * 0.75, defPose);
+        ctx.restore();
+      } else {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        drawPuppet(FIGHT.defImg, defX + defShakeX, defY, defH, true, fa * 0.4, defPose);
+        ctx.restore();
+      }
     }
   }
 
-  // --- 攻方(puppet: 呼吸/下蹲蓄力/前送出招/过冲收招) ---
-  const attH = FIGHT.attIsPortrait ? PH : 420;
-  const attY = standY + (FIGHT.attIsPortrait ? 0 : 100) + attLeapY;
+  // --- 攻方(puppet: 呼吸/下蹲蓄力/前送出招/过冲收招; P1-11 独占期推近放大, 脚底锚定不飘) ---
+  const attH0 = FIGHT.attIsPortrait ? PH : 420;
+  const attH = attH0 * attScale;
+  const attY = standY + (FIGHT.attIsPortrait ? 0 : 100) + attLeapY - (attH - attH0);
   const attW0 = attH * (FIGHT.attImg.width / FIGHT.attImg.height); // 立绘宽(搭档站位用)
   // P1-7: 合体技双立绘同框 — 搭档画在主攻右侧(萧左郭右), 先画搭档让主攻叠其上;
   // 蓄力同频, 出招接力晚~130ms(双动机接力), 突进位移只跟 30%(主攻是镜头主角)
   let partnerX = 0, partnerY = 0, partnerH = 0;
   if (FIGHT.comboPartner) {
     partnerH = FIGHT.partnerIsPortrait ? PH * 0.92 : 400;
-    partnerX = attX + attLunge * 0.3 + attW0 * 0.60;
+    partnerX = attX + attDX + attLunge * 0.3 + attW0 * 0.60;
     partnerY = standY + (FIGHT.partnerIsPortrait ? 6 : 108);
     const pPose = fightPartnerPose(p, now, tStrike);
     pPose.whole = !FIGHT.partnerIsPortrait;
@@ -1049,11 +1076,11 @@ function drawFightScene(nowReal) {
     const relayLunge = win(p, tStrike + 30, tStrike + 170) * (1 - win(p, tStrike + 170, tStrike + 420)) * 46;
     drawPuppet(FIGHT.partnerImg, partnerX + relayLunge, partnerY, partnerH, false, outA, pPose);
   }
-  drawPuppet(FIGHT.attImg, attX + attLunge, attY, attH, false, outA, attPose);
+  drawPuppet(FIGHT.attImg, attX + attDX + attLunge, attY, attH, false, outA, attPose);
 
   // --- 蓄力光球(攻方右前方=出手点; chargeP=蓄力进度驱动光球聚合) ---
   const chargeP = win(p, FT.enter, tStrike);
-  let gunX = attX + attLunge + (FIGHT.attIsPortrait ? 300 : 250);
+  let gunX = attX + attDX + attLunge + (FIGHT.attIsPortrait ? 300 : 250);
   let gunY = attY + attH * 0.42;
   if (FIGHT.comboPartner) {
     // 合体技: 光球在双立绘手部之间聚合(两人内力合流, 再一道发出)
@@ -1169,10 +1196,13 @@ function drawFightScene(nowReal) {
     ctx.restore();
   }
 
-  // --- 底部 HP 条(双方, 机战样式); 合体技左侧显示双侠合璧名 ---
+  // --- 底部 HP 条(双方, 机战样式); 合体技左侧显示双侠合璧名; P1-11: 守方血条随登场/退场淡入出 ---
   drawFightHpBar(ev.att, CW * 0.06, CH - 96, false,
     FIGHT.comboPartner ? ev.att.cn + ' · ' + FIGHT.comboPartner.cn : null);
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, defAlpha * 1.6);
   drawFightHpBar(ev.def, CW * 0.54, CH - 96, true);
+  ctx.restore();
   ctx.restore();
 
   // ==== P1-5: 击破情绪峰值(白闪定格 → 击破大字 → 攻方胜利台词) ====

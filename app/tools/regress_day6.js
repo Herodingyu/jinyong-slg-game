@@ -1,4 +1,5 @@
-// F-Day6 回归: 完整走一局五幕(开场镜头→选中移动→攻击演出→敌方回合反击→击破台词)
+// F-Day6 回归: 完整走一局五幕(剧情链→开场镜头→选中移动→攻击演出→敌方回合反击→击破台词)
+// P3-11a 后 startBtn 进的是 标题卡→对白→出击→开场镜头 全链, 幕1 须驱动完整(对白要点击推进)
 // 跑法: node tools/regress_day6.js  — 断言全程零 pageerror, 五幕事件按序发生
 const puppeteer = require('/usr/lib/node_modules/url-to-markdown-cli-tool/node_modules/puppeteer');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -13,10 +14,16 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.goto('http://localhost:8124', { waitUntil: 'networkidle0', timeout: 30000 });
   await sleep(400);
 
-  // 幕1: 开场镜头(3.4s)
+  // 幕1: 剧情链(标题卡2.6s→7句对白[首击补全/再击翻页]→出击2.6s→开场镜头3.4s)
   await page.click('#startBtn');
-  await page.waitForFunction(() => !INTRO.active, { timeout: 8000, polling: 100 });
-  console.log('幕1 开场镜头: OK');
+  await sleep(2900);                                   // 标题卡
+  for (let i = 0; i < 7; i++) {                        // 7 句对白, 点击推进(不可多点: 会跳过出击/镜头)
+    await page.mouse.click(420, 320); await sleep(200);
+    await page.mouse.click(420, 320); await sleep(340);
+  }
+  await sleep(2900);                                   // 出击画面
+  await page.waitForFunction(() => !INTRO.active, { timeout: 9000, polling: 100 });
+  console.log('幕1 剧情链+开场镜头: OK');
 
   // 幕2: 选中萧峰 → 移动 → 菜单出现
   await page.evaluate(() => {
@@ -49,11 +56,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.waitForFunction(() => !FIGHT.active, { timeout: 20000, polling: 100 });
   console.log('幕3 演出完整收尾: OK');
 
-  // 幕4: 敌方回合(结束回合 → 敌人行动或跳过)
+  // 幕4: 敌方回合(结束回合 → 敌人行动或跳过); P1-11 后单场演出~2.1s, 轮询等回合回我方而非固定 sleep
   await page.click('#endTurn');
-  await sleep(4500);
-  const phaseBack = await page.evaluate(() => G.phase);
-  console.log('幕4 敌方回合流转:', phaseBack === 'player' ? 'OK' : `phase=${phaseBack}`);
+  await page.waitForFunction(() => G.phase === 'player', { timeout: 30000, polling: 300 });
+  console.log('幕4 敌方回合流转: OK');
 
   // 幕5: 击破定格+台词 — 用火枪高伤直接打死一个残血敌
   await page.evaluate(() => {
@@ -69,7 +75,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
   const skipped = await page.evaluate(() => window.__noFoe === true);
   if (!skipped) {
-    await page.evaluate(() => animateEvent(window.__ev2, true));
+    await page.evaluate(() => { animateEvent(window.__ev2, true); }); // 不 await: evaluate 会等 promise 返回, 演出收场后 FIGHT.active 恒 false
     await page.waitForFunction(() => FIGHT.active, { timeout: 8000, polling: 60 });
     await page.waitForFunction(() => !FIGHT.active, { timeout: 20000, polling: 100 });
     console.log('幕5 击破演出: OK');
