@@ -34,6 +34,8 @@ const FIGHT = { active: false, ev: null, t0: 0, crit: false, isMiss: false, spar
                 killAt: 0,       // P1-5: HP归零时刻(相对t0), 击破定格+台词时间轴锚点
                 comboPartner: null,  // P1-7: 合体技搭档单位(双立绘同框), 由 ev.partner 注入
                 partnerImg: null, partnerIsPortrait: false, _relaySparked: false,
+                animCfg: null,       // P1-12: 当前招式完整 anim 配置(特效读取 beams 等可选参数)
+                _hit2Sparked: false, // P1-12: dash 第二拳火花一次性标记
                 gunX: 0, gunY: 0 };
 
 // P1-8: 开场镜头调度 — 开场横幅后镜头变焦扫场(我方→敌方→BOSS→归位) + 敌我位置脉冲
@@ -366,23 +368,173 @@ function drawPuppet(im, x, y, h, mirror, alpha, pose) {
 // easeOutBack: 收招过冲回弹(机战式挥空后回位)
 function easeOutBack(t) { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); }
 
-// 攻方姿态时间轴: 待机呼吸 -> 蓄力下沉 -> 出招前送(腿后蹬) -> 收招过冲回弹
-// tStrike=命中时刻(相对t0), p=当前进度(相对t0)
-function fightAttPose(p, now, tStrike) {
-  const chargeP = win(p, FT.enter, tStrike);            // 蓄力进度
-  const strikeIn = win(p, tStrike - 110, tStrike + 20); // 前送(快)
-  const strikeOut = win(p, tStrike + 20, tStrike + 310);// 回弹(带回冲)
-  const breathe = Math.sin(now / 280) * 0.012;          // 待机呼吸
-  const snap = strikeIn * (1 - easeOutBack(strikeOut)); // 出招冲量(归位时过冲为负)
+// ============ P1-12: 每招式差异化动作编排(丁工 10-23 点名"每一种招式动作是不一样的") ============
+// 基础时间轴: charge=蓄力进度, snap=快起前送→easeOutBack 带回冲归位; 各招式函数自取所需窗口。
+// 设计原则(苛刻老玩家): 身体先于特效说话——直拳小快灵/横扫扭腰抡臂/降龙沉身推掌/
+// 空明云手慢摇/指法头部锁定瞄准/火枪后坐力/匕首弹射突刺/棒杖抡起俯砸/残谱正反双斩。
+function attBase(p, now, tStrike) {
+  const chargeP = win(p, FT.enter, tStrike);
+  const snap = win(p, tStrike - 110, tStrike + 20) * (1 - easeOutBack(win(p, tStrike + 20, tStrike + 310)));
+  return { chargeP, snap, breathe: Math.sin(now / 280) * 0.012 };
+}
+// dash 太祖长拳·快拳连打: 紧凑站架两记快拳(第二拳冲量65%), 前倾小快灵
+function poseAttDash(p, now, tStrike) {
+  const { chargeP, breathe } = attBase(p, now, tStrike);
+  const jab1 = win(p, tStrike - 110, tStrike + 20) * (1 - easeOutBack(win(p, tStrike + 20, tStrike + 300)));
+  const jab2raw = win(p, tStrike + 130, tStrike + 220) * (1 - easeOutBack(win(p, tStrike + 220, tStrike + 470)));
+  const snap = jab1 + 0.65 * Math.max(0, jab2raw);
   return {
-    lean: 6 * chargeP + 9 * snap,                       // 蓄力前倾6°(沉身) -> 出招躯干前送9°
-    headLean: 4 * chargeP + 5 * Math.max(0, snap) + Math.sin(now / 420) * 1.5, // 头随躯干+待机微侧1.5°
-    headDY: 5 * chargeP,                                // 蓄力头下沉(蓄势感)
-    squash: (1 - 0.07 * chargeP) * (1 + 0.035 * Math.max(0, snap)) + breathe, // 下蹲0.93 / 出招挺直
-    legDX: -12 * Math.max(0, snap) + 3 * chargeP,       // 出招腿后蹬 / 蓄力重心前移
-    legDY: 3 * chargeP,                                 // 蓄力屈膝
-    legLean: -6 * Math.max(0, snap),                    // 后腿蹬直
+    lean: 5 * chargeP + 8 * snap,
+    headLean: 3 * chargeP + 4 * Math.max(0, snap) + Math.sin(now / 420) * 1.5,
+    headDY: 5 * chargeP,
+    squash: (1 - 0.06 * chargeP) * (1 + 0.03 * Math.max(0, snap)) + breathe,
+    legDX: -10 * Math.max(0, snap) + 3 * chargeP,
+    legDY: 3 * chargeP,
+    legLean: -5 * Math.max(0, snap),
   };
+}
+// sweep 横扫(打狗棒/弯刀): 先扭身后抡扫——lean 由负扫到正, 腿随转体大摆
+function poseAttSweep(p, now, tStrike) {
+  const { chargeP, breathe } = attBase(p, now, tStrike);
+  const windup = win(p, FT.enter + 60, tStrike - 150);
+  const sweepIn = win(p, tStrike - 150, tStrike + 30);
+  const sweepOut = win(p, tStrike + 30, tStrike + 380);
+  const thru = sweepIn * (1 - easeOutBack(sweepOut));
+  const coil = windup * (1 - sweepIn); // 扭身蓄力(挥出即消失)
+  return {
+    lean: -9 * coil + 16 * thru,
+    headLean: -5 * coil + 8 * Math.max(0, thru) + Math.sin(now / 420) * 1.5,
+    headDY: 4 * chargeP,
+    squash: (1 - 0.04 * coil - 0.03 * chargeP) * (1 + 0.03 * Math.max(0, thru)) + breathe,
+    legDX: 8 * coil - 18 * Math.max(0, thru) + 3 * chargeP,
+    legDY: 3 * chargeP,
+    legLean: 6 * coil - 10 * Math.max(0, thru),
+  };
+}
+// dragon 降龙十八掌·双掌前推: 全招式最深马步蓄力(squash 0.88), 全身前推送掌(最大前倾18°)
+function poseAttDragon(p, now, tStrike) {
+  const { breathe } = attBase(p, now, tStrike);
+  const chargeP = win(p, FT.enter, tStrike - 60);        // 蓄力窗口更长(沉身更久)
+  const pushIn = win(p, tStrike - 130, tStrike + 30);
+  const pushOut = win(p, tStrike + 30, tStrike + 430);
+  const push = pushIn * (1 - easeOutBack(pushOut));
+  return {
+    lean: 11 * chargeP + 18 * Math.max(0, push),
+    headLean: 5 * chargeP + 9 * Math.max(0, push) + Math.sin(now / 420) * 1.5,
+    headDY: 8 * chargeP - 3 * Math.max(0, push),
+    squash: (1 - 0.12 * chargeP) * (1 + 0.045 * Math.max(0, push)) + breathe,
+    legDX: -16 * Math.max(0, push) + 4 * chargeP,
+    legDY: 6 * chargeP,
+    legLean: -8 * Math.max(0, push),
+  };
+}
+// wave 空明拳·云手气浪: 蓄力期云手慢摇(sin 摆), 出招柔推(慢进慢出)
+function poseAttWave(p, now, tStrike) {
+  const { chargeP, breathe } = attBase(p, now, tStrike);
+  const sway = Math.sin(now / 320) * 4 * chargeP;
+  const pushIn = win(p, tStrike - 150, tStrike + 60);
+  const pushOut = win(p, tStrike + 60, tStrike + 470);
+  const push = pushIn * (1 - easeOutBack(pushOut));
+  return {
+    lean: sway + 9 * push,
+    headLean: sway * 0.6 + 4 * push + Math.sin(now / 420) * 1.5,
+    headDY: 3 * chargeP,
+    squash: 1 - 0.04 * chargeP + 0.02 * push + breathe,
+    legDX: 3 * chargeP - 8 * Math.max(0, push),
+    legDY: 2 * chargeP,
+    legLean: -4 * Math.max(0, push),
+  };
+}
+// beam 六脉/一阳指·凝指点射: 蓄力后仰凝神、头部几乎不动(瞄准感), 出招速点即回
+function poseAttBeam(p, now, tStrike) {
+  const { chargeP, breathe } = attBase(p, now, tStrike);
+  const aim = win(p, FT.enter + 120, tStrike - 160) * (1 - win(p, tStrike - 100, tStrike + 10));
+  const jabIn = win(p, tStrike - 90, tStrike + 15);
+  const jabOut = win(p, tStrike + 15, tStrike + 280);
+  const jab = jabIn * (1 - easeOutBack(jabOut));
+  return {
+    lean: -5 * aim + 7 * jab,
+    headLean: -2 * aim + 1 * jab + Math.sin(now / 420) * 1.5, // 头锁住=在瞄准
+    headDY: -4 * aim + 2 * jab,
+    squash: (1 - 0.03 * chargeP) * (1 + 0.02 * jab) + breathe,
+    legDX: -9 * Math.max(0, jab) + 2 * aim,
+    legDY: 2 * aim,
+    legLean: -4 * Math.max(0, jab),
+  };
+}
+// bullet 火枪·瞄准射击: 贴腮瞄准(头后仰), 击发后整个人被后坐力震仰——老玩家一眼认出的枪感
+function poseAttBullet(p, now, tStrike) {
+  const { breathe } = attBase(p, now, tStrike);
+  const aim = win(p, FT.enter + 100, tStrike - 120) * (1 - win(p, tStrike - 40, tStrike + 60));
+  const recoilIn = win(p, tStrike - 30, tStrike + 130);
+  const recoilOut = win(p, tStrike + 130, tStrike + 540);
+  const recoil = recoilIn * (1 - easeOutBack(recoilOut));
+  return {
+    lean: -4 * aim - 13 * recoil,
+    headLean: -6 * aim - 9 * recoil + Math.sin(now / 420) * 1.5,
+    headDY: 2 * aim + 3 * recoil,
+    squash: (1 - 0.02 * aim) * (1 - 0.05 * recoil) + breathe,
+    legDX: 10 * recoil,                                // 重心后错半步
+    legDY: 2 * aim,
+    legLean: 6 * recoil,
+  };
+}
+// stab 匕首·瞬步突刺: 深蹲蓄力→整个人弹射前扑(最大前倾20°+弓箭步后腿蹬直), 全招式最凶
+function poseAttStab(p, now, tStrike) {
+  const { chargeP, breathe } = attBase(p, now, tStrike);
+  const lungeIn = win(p, tStrike - 100, tStrike + 10);
+  const lungeOut = win(p, tStrike + 10, tStrike + 340);
+  const lunge = lungeIn * (1 - easeOutBack(lungeOut));
+  return {
+    lean: 7 * chargeP + 20 * Math.max(0, lunge),
+    headLean: 3 * chargeP + 5 * Math.max(0, lunge) + Math.sin(now / 420) * 1.5,
+    headDY: 4 * chargeP,
+    squash: (1 - 0.10 * chargeP) * (1 + 0.05 * Math.max(0, lunge)) + breathe,
+    legDX: -22 * Math.max(0, lunge) + 3 * chargeP,    // 大弓箭步
+    legDY: 4 * chargeP,
+    legLean: -12 * Math.max(0, lunge),                // 后腿完全蹬直
+  };
+}
+// smash 下砸(狼牙棒/铁杖): 深蹲抡起(上挺拉伸)→俯身砸落, 与整体跃起(attLeapY)叠加
+function poseAttSmash(p, now, tStrike) {
+  const { chargeP, breathe } = attBase(p, now, tStrike);
+  const windup = win(p, FT.enter + 80, tStrike - 170);
+  const slamIn = win(p, tStrike - 170, tStrike + 40);
+  const slamOut = win(p, tStrike + 40, tStrike + 400);
+  const slam = slamIn * (1 - easeOutBack(slamOut));
+  const coil = windup * (1 - slamIn);
+  return {
+    lean: -7 * coil + 15 * Math.max(0, slam),         // 先仰身后俯砸
+    headLean: -4 * coil + 7 * Math.max(0, slam) + Math.sin(now / 420) * 1.5,
+    headDY: 4 * chargeP + 3 * coil,
+    squash: (1 - 0.06 * chargeP) * (1 + 0.05 * coil) * (1 - 0.02 * slam) + breathe,
+    legDX: 6 * coil - 12 * Math.max(0, slam),
+    legDY: 5 * chargeP,
+    legLean: 5 * coil - 7 * Math.max(0, slam),
+  };
+}
+// slashx 残谱一式·交叉双斩: 躯干左右双快斩(一正一反两个 snap), 扭腰挥臂感
+function poseAttSlashX(p, now, tStrike) {
+  const { chargeP, breathe } = attBase(p, now, tStrike);
+  const c1 = win(p, tStrike - 110, tStrike + 10) * (1 - easeOutBack(win(p, tStrike + 10, tStrike + 170)));
+  const c2raw = win(p, tStrike + 150, tStrike + 260) * (1 - easeOutBack(win(p, tStrike + 260, tStrike + 540)));
+  const c2 = Math.max(0, c2raw);
+  return {
+    lean: 5 * chargeP + 10 * c1 - 12 * c2,
+    headLean: 3 * chargeP + 6 * c1 - 7 * c2 + Math.sin(now / 420) * 1.5,
+    headDY: 4 * chargeP,
+    squash: (1 - 0.05 * chargeP) + breathe,
+    legDX: -8 * Math.max(0, c1) + 10 * c2 + 2 * chargeP,
+    legDY: 2 * chargeP,
+    legLean: -6 * Math.max(0, c1) + 7 * c2,
+  };
+}
+// 出招动作编排分发表: kind→专属身段; 未识别 kind 回退 dash
+const ATT_POSES = { dash: poseAttDash, sweep: poseAttSweep, dragon: poseAttDragon, wave: poseAttWave,
+                    beam: poseAttBeam, bullet: poseAttBullet, stab: poseAttStab, smash: poseAttSmash,
+                    slashx: poseAttSlashX };
+function fightAttPose(p, now, tStrike) {
+  return (ATT_POSES[FIGHT.animKind] || poseAttDash)(p, now, tStrike);
 }
 // P1-7: 合体技搭档姿态 — 蓄力与主攻同步(双人同频运劲), 出招冲量晚~130ms再起:
 // 主攻先至、搭档接力, 机战合体技的"双动机接力"打击感; 其余基底参数复用 fightAttPose
@@ -449,6 +601,8 @@ function startFight(ev) {
   const anim = (ev.w.anim) || { kind: 'dash', color: '#ffb84a' };
   FIGHT.animKind = anim.kind;
   FIGHT.animColor = anim.color;
+  FIGHT.animCfg = anim;          // P1-12: 六道剑气等可选参数
+  FIGHT._hit2Sparked = false;    // P1-12: dash 连打第二拳
   // 立绘优先, 无立绘角色用地图 sprite 放大回退(保持横版对峙成立)
   const ap = portraits[ev.att.sprite], dp = portraits[ev.def.sprite];
   FIGHT.attIsPortrait = !!(ap && ap.complete);
@@ -487,6 +641,7 @@ function startFight(ev) {
 function endFight() {
   FIGHT.active = false; FIGHT.ev = null; FIGHT.sparks = []; FIGHT.snow = [];
   FIGHT.killAt = 0;
+  FIGHT.animCfg = null; FIGHT._hit2Sparked = false; // P1-12
   FIGHT.comboPartner = null; FIGHT.partnerImg = null; FIGHT._relaySparked = false; // P1-7
   FX.hpAnim = null;
 }
@@ -1077,6 +1232,15 @@ function drawFightScene(nowReal) {
     drawPuppet(FIGHT.partnerImg, partnerX + relayLunge, partnerY, partnerH, false, outA, pPose);
   }
   drawPuppet(FIGHT.attImg, attX + attDX + attLunge, attY, attH, false, outA, attPose);
+  // P1-12: 瞬步突刺/快拳/双斩的攻方残影 — 身体"动出来"的速度感(身后两层渐淡)
+  if (!FIGHT.isMiss && (FIGHT.animKind === 'stab' || FIGHT.animKind === 'dash' || FIGHT.animKind === 'slashx')) {
+    const gp = win(p, tStrike - 60, tStrike + 240) * (1 - win(p, tStrike + 240, tStrike + 540));
+    if (gp > 0.02) {
+      drawPuppet(FIGHT.attImg, attX + attDX + attLunge - 46 * gp, attY + 4, attH, false, 0.20 * gp * outA, attPose);
+      if (FIGHT.animKind === 'stab') // 突刺最凶, 双层残影
+        drawPuppet(FIGHT.attImg, attX + attDX + attLunge - 92 * gp, attY + 8, attH, false, 0.10 * gp * outA, attPose);
+    }
+  }
 
   // --- 蓄力光球(攻方右前方=出手点; chargeP=蓄力进度驱动光球聚合) ---
   const chargeP = win(p, FT.enter, tStrike);
@@ -1105,7 +1269,7 @@ function drawFightScene(nowReal) {
   const strikeP = win(p, tStrike - 50, tStrike + 220);
   const defCx = defX + defW * 0.45, defCy = defY + defH * 0.42;
   if (!FIGHT.isMiss && strikeP > 0 && strikeP <= 1)
-    drawWeaponFx(strikeP, now, gunX, gunY, defCx, defCy, attX + attLunge, attY, attH);
+    drawWeaponFx(strikeP, p, now, gunX, gunY, defCx, defCy, attX + attLunge, attY, attH);
 
   // --- 命中: 火花+伤害大字+击破 / 落空: 闪避大字 ---
   if (FIGHT.isMiss) {
@@ -1133,6 +1297,12 @@ function drawFightScene(nowReal) {
       spawnSparks(defCx, defCy, '#ffd24a', 18);
       FX.shakeUntil = Math.max(FX.shakeUntil, performance.now() + 420);
       FIGHT._relaySparked = true;
+    }
+    // P1-12: 太祖长拳连打第二拳 — 守方处补爆火花+轻震(一次性, 与特效第二爆同帧)
+    if (FIGHT.animKind === 'dash' && !FIGHT._hit2Sparked && p >= tStrike + 150) {
+      spawnSparks(defCx, defCy, FIGHT.animColor, 10);
+      FX.shakeUntil = Math.max(FX.shakeUntil, performance.now() + 160);
+      FIGHT._hit2Sparked = true;
     }
     drawSparks(now);
     const dp = win(p, tStrike + 60, tStrike + 980);
@@ -1279,8 +1449,9 @@ function drawFightHpBar(u, x, y, isDef, label) {
   ctx.restore();
 }
 
-// ============ B2: 各武器专属动作特效 ============
-function drawWeaponFx(t, now, gx, gy, tx, ty, attX, attY, attH) {
+// ============ B2: 各武器专属动作特效(P1-12: 特效与身段同等级差异化, 零素材) ============
+// t=出招进度(0~1), p=FIGHT 相对时刻(ms, 供第二击等错峰窗口); gx/gy=出手点, tx/ty=受击点
+function drawWeaponFx(t, p, now, gx, gy, tx, ty, attX, attY, attH) {
   const c = FIGHT.animColor;
   ctx.save();
   ctx.globalAlpha = Math.min(1, t * 4) * (1 - Math.max(0, t - 0.8) * 3);
@@ -1288,21 +1459,74 @@ function drawWeaponFx(t, now, gx, gy, tx, ty, attX, attY, attH) {
   const len = Math.hypot(dx, dy) || 1;
   const ux = dx / len, uy = dy / len;
   switch (FIGHT.animKind) {
-    case 'beam': { // 光束: 由细到粗再收, 端点爆
-      const w = (t < 0.3 ? t / 0.3 : 1 - (t - 0.3) / 0.7 * 0.7) * (FIGHT.crit ? 26 : 17);
-      const g = ctx.createLinearGradient(gx, gy, tx, ty);
-      g.addColorStop(0, '#ffffff');
-      g.addColorStop(0.4, c);
-      g.addColorStop(1, '#ffffff');
-      ctx.strokeStyle = g; ctx.lineWidth = w; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(gx, gy);
-      const mx = gx + ux * len * (0.4 + t * 0.6), my = gy + uy * len * (0.4 + t * 0.6) + Math.sin(now / 40) * 3;
-      ctx.quadraticCurveTo(mx, my, tx, ty); ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = Math.max(2, w * 0.35);
-      ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(tx, ty); ctx.stroke();
+    case 'beam': { // 光束: 六脉=六道剑气扇形齐发; 一阳指=单道粗光束+端点余辉
+      const n = (FIGHT.animCfg && FIGHT.animCfg.beams) || 1;
+      if (n > 1) { // 六脉神剑: 六道细剑气扇形散开+各自错峰, 收束于同一点(六脉汇一)
+        for (let b = 0; b < n; b++) {
+          const tb = Math.max(0, Math.min(1, t * 1.7 - b * 0.11));
+          if (tb <= 0) continue;
+          const ang = (b - (n - 1) / 2) * 0.055;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const ux2 = ux * ca - uy * sa, uy2 = ux * sa + uy * ca;
+          const w2 = (tb < 0.3 ? tb / 0.3 : 1 - (tb - 0.3) / 0.7 * 0.6) * 8;
+          const g = ctx.createLinearGradient(gx, gy, tx, ty);
+          g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, c); g.addColorStop(1, '#eaffff');
+          ctx.strokeStyle = g; ctx.lineWidth = w2; ctx.lineCap = 'round';
+          ctx.globalAlpha = Math.min(1, tb * 5) * (1 - Math.max(0, tb - 0.82) * 2.5);
+          ctx.beginPath(); ctx.moveTo(gx, gy);
+          ctx.lineTo(gx + ux2 * len * tb, gy + uy2 * len * tb); ctx.stroke();
+        }
+        // 六脉汇聚爆光(端点)
+        const hg = ctx.createRadialGradient(tx, ty, 0, tx, ty, 42);
+        hg.addColorStop(0, '#fff'); hg.addColorStop(0.4, c); hg.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.globalAlpha = Math.min(1, t * 4) * (1 - Math.max(0, t - 0.75) * 3);
+        ctx.fillStyle = hg;
+        ctx.beginPath(); ctx.arc(tx, ty, 42, 0, Math.PI * 2); ctx.fill();
+      } else { // 一阳指: 单道粗光束, 收招后端点余辉不撒(指力透体)
+        const w = (t < 0.3 ? t / 0.3 : 1 - (t - 0.3) / 0.7 * 0.7) * (FIGHT.crit ? 26 : 17);
+        const g = ctx.createLinearGradient(gx, gy, tx, ty);
+        g.addColorStop(0, '#ffffff');
+        g.addColorStop(0.4, c);
+        g.addColorStop(1, '#ffffff');
+        ctx.strokeStyle = g; ctx.lineWidth = w; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(gx, gy);
+        const mx = gx + ux * len * (0.4 + t * 0.6), my = gy + uy * len * (0.4 + t * 0.6) + Math.sin(now / 40) * 3;
+        ctx.quadraticCurveTo(mx, my, tx, ty); ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = Math.max(2, w * 0.35);
+        ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(tx, ty); ctx.stroke();
+        const lg = win(t, 0.5, 0.64) * (1 - win(t, 0.64, 1)); // 端点余辉
+        if (lg > 0) {
+          const hg2 = ctx.createRadialGradient(tx, ty, 0, tx, ty, 46);
+          hg2.addColorStop(0, '#fff'); hg2.addColorStop(0.35, c); hg2.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.globalAlpha = lg * 0.9;
+          ctx.fillStyle = hg2;
+          ctx.beginPath(); ctx.arc(tx, ty, 46, 0, Math.PI * 2); ctx.fill();
+        }
+      }
       break;
     }
-    case 'bullet': { // 弹丸+拖尾
+    case 'bullet': { // 弹丸+拖尾+枪口焰+硝烟(枪感三件套)
+      if (t < 0.22) { // 枪口星形焰(击发瞬间)
+        const mf = 1 - t / 0.22;
+        ctx.globalAlpha = mf;
+        ctx.fillStyle = '#fff2c0';
+        const mr2 = 8 + mf * 14;
+        ctx.beginPath();
+        for (let k = 0; k < 8; k++) {
+          const a = k * Math.PI / 4, rr2 = k % 2 ? mr2 * 0.45 : mr2;
+          ctx.lineTo(gx + Math.cos(a) * rr2, gy + Math.sin(a) * rr2);
+        }
+        ctx.closePath(); ctx.fill();
+      }
+      for (let i = 0; i < 3; i++) { // 硝烟团: 三团缓升确定性飘移
+        const sp = win(t, 0.06 + i * 0.1, 0.75 + i * 0.08);
+        if (sp <= 0) continue;
+        ctx.globalAlpha = 0.28 * (1 - sp);
+        ctx.fillStyle = '#b9bcc8';
+        ctx.beginPath();
+        ctx.arc(gx - ux * (12 + sp * 34) + (i - 1) * 9, gy - uy * (12 + sp * 34) - sp * 30, 6 + sp * 12, 0, Math.PI * 2);
+        ctx.fill();
+      }
       const px = gx + ux * len * t, py = gy + uy * len * t;
       for (let i = 1; i <= 6; i++) {
         ctx.globalAlpha *= 0.82;
@@ -1314,7 +1538,7 @@ function drawWeaponFx(t, now, gx, gy, tx, ty, attX, attY, attH) {
       ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill();
       break;
     }
-    case 'dragon': { // 龙形气劲: 曲线蛇行+龙头光球+鳞片光点
+    case 'dragon': { // 龙形气劲: 曲线蛇行+龙头光球+鳞片光点 + 命中地面掌风涟漪
       const head = Math.min(1, t * 1.15);
       const segs = 22;
       ctx.lineCap = 'round';
@@ -1335,14 +1559,24 @@ function drawWeaponFx(t, now, gx, gy, tx, ty, attX, attY, attH) {
       ctx.globalAlpha = 1;
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(hx, hy, 34, 0, Math.PI * 2); ctx.fill();
+      const rip = win(t, 0.55, 1); // 掌风压地: 守方脚下雪尘涟漪环形扩散
+      if (rip > 0) {
+        ctx.strokeStyle = c; ctx.lineWidth = 5 * (1 - rip) + 1;
+        ctx.globalAlpha = (1 - rip) * 0.8;
+        ctx.beginPath(); ctx.ellipse(tx, ty + 130, 30 + rip * 140, (30 + rip * 140) * 0.32, 0, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = '#fff';
+        ctx.globalAlpha = (1 - rip) * 0.4;
+        ctx.beginPath(); ctx.ellipse(tx, ty + 130, 18 + rip * 90, (18 + rip * 90) * 0.32, 0, 0, Math.PI * 2); ctx.stroke();
+      }
       break;
     }
-    case 'sweep': { // 横扫弧光: 大弧从攻方扫到守方
+    case 'sweep': { // 横扫弧光: 大弧从攻方扫到守方 + 延迟尾弧(风声) + 命中横斩冲击带
       const mid = Math.min(1, t * 1.2);
       const r = len * 0.62;
       const cx2 = gx + dx * 0.5, cy2 = gy + dy * 0.5 - 60;
       const a0 = Math.atan2(gy - cy2, gx - cx2);
-      const a1 = a0 + (Math.atan2(ty - cy2, tx - cx2) - a0) * mid;
+      const aEnd = Math.atan2(ty - cy2, tx - cx2);
+      const a1 = a0 + (aEnd - a0) * mid;
       for (let i = 0; i < 3; i++) {
         ctx.strokeStyle = i === 0 ? '#ffffff' : c;
         ctx.lineWidth = (16 - i * 4);
@@ -1351,10 +1585,26 @@ function drawWeaponFx(t, now, gx, gy, tx, ty, attX, attY, attH) {
         ctx.arc(cx2, cy2, r - i * 12, Math.min(a0, a1), Math.max(a0, a1));
         ctx.stroke();
       }
+      for (let i = 1; i <= 2; i++) { // 尾弧: 挥过的轨迹留两圈渐散风痕
+        const tm = Math.min(1, t * 1.2 - i * 0.1);
+        if (tm <= 0) continue;
+        const a1i = a0 + (aEnd - a0) * tm;
+        ctx.strokeStyle = c; ctx.lineWidth = 7 - i * 2;
+        ctx.globalAlpha = Math.max(0, 0.5 - i * 0.16) * (1 - tm * 0.55);
+        ctx.beginPath();
+        ctx.arc(cx2, cy2, r + i * 15, Math.min(a0, a1i), Math.max(a0, a1i));
+        ctx.stroke();
+      }
+      if (t > 0.5) { // 命中横斩冲击带: 守方处水平白刃带扩开
+        const bt = win(t, 0.5, 1);
+        ctx.globalAlpha = (1 - bt) * 0.75;
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 10 * (1 - bt) + 2;
+        ctx.beginPath(); ctx.moveTo(tx - 80 * (1 + bt * 0.8), ty); ctx.lineTo(tx + 80 * (1 + bt * 0.8), ty); ctx.stroke();
+      }
       break;
     }
-    case 'wave': { // 环形气浪推进
-      const rings = 4;
+    case 'wave': { // 环形气浪推进 + 阴阳双游光点(空明拳意)
+      const rings = 6;
       for (let i = 0; i < rings; i++) {
         const rt = (t * 1.5 + i / rings) % 1;
         ctx.strokeStyle = c;
@@ -1364,9 +1614,25 @@ function drawWeaponFx(t, now, gx, gy, tx, ty, attX, attY, attH) {
         ctx.ellipse(gx + dx * rt, gy + dy * rt, 46 * (1 - rt * 0.4), 26 * (1 - rt * 0.4), Math.atan2(dy, dx), 0, Math.PI * 2);
         ctx.stroke();
       }
+      const rt2 = (t * 1.5) % 1; // 最前环上反向流转的双光点
+      const cx3 = gx + dx * rt2, cy3 = gy + dy * rt2;
+      const rx = 46 * (1 - rt2 * 0.4), ry = rx * 0.55;
+      for (let k = 0; k < 2; k++) {
+        const ph = now / 180 * (k ? -1 : 1) + k * Math.PI;
+        ctx.globalAlpha = (1 - rt2) * 0.9;
+        ctx.fillStyle = k ? '#ffffff' : c;
+        ctx.beginPath();
+        ctx.arc(cx3 + Math.cos(ph) * rx, cy3 + Math.sin(ph) * ry, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
       break;
     }
-    case 'stab': { // 突刺: 尖刺闪光+直线残影
+    case 'stab': { // 突刺: 尖刺闪光+直线残影 + 瞬闪整条白芒 + 命中星芒
+      if (t > 0.05 && t < 0.3) { // 瞬闪: 出手一瞬的整条白芒(读得出"一刺即到")
+        ctx.globalAlpha = (0.3 - t) * 3;
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(tx, ty); ctx.stroke();
+      }
       const reach = Math.min(1, t * 1.6);
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 5; ctx.lineCap = 'round';
       for (let i = 0; i < 5; i++) {
@@ -1377,9 +1643,23 @@ function drawWeaponFx(t, now, gx, gy, tx, ty, attX, attY, attH) {
         ctx.lineTo(gx + ux * len * back, gy + uy * len * back);
         ctx.stroke();
       }
+      if (t > 0.15 && t < 0.62) { // 命中星芒(四尖)
+        const sa = (0.62 - t) / 0.47;
+        const sr = 10 + sa * 22;
+        ctx.globalAlpha = sa;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        for (let k = 0; k < 8; k++) {
+          const a2 = k * Math.PI / 4, rr3 = k % 2 ? sr * 0.4 : sr;
+          ctx.lineTo(tx + Math.cos(a2) * rr3, ty + Math.sin(a2) * rr3);
+        }
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = c; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(tx, ty, sr * 0.7, 0, Math.PI * 2); ctx.stroke();
+      }
       break;
     }
-    case 'smash': { // 下砸: 落点冲击环+地裂纹
+    case 'smash': { // 下砸: 落点冲击环+地裂纹 + 碎石迸起(确定性抛物线)
       const drop = Math.min(1, t * 1.3);
       const rr = drop * 120;
       ctx.strokeStyle = c; ctx.lineWidth = 8 * (1 - drop) + 2;
@@ -1394,9 +1674,32 @@ function drawWeaponFx(t, now, gx, gy, tx, ty, attX, attY, attH) {
         ctx.lineTo(tx + Math.cos(a) * rr * 0.9, ty + 40 + Math.sin(a) * rr * 0.32);
         ctx.stroke();
       }
+      if (t > 0.15) { // 碎石: 八颗按各自相位抛出再落回(雪地下砸的实体感)
+        for (let i = 0; i < 8; i++) {
+          const seed = i * 2.4;
+          const dp = win(t, 0.15 + (i % 3) * 0.04, 0.92);
+          if (dp <= 0) continue;
+          const vx = Math.sin(seed) * 70, vy0 = 100 + (i % 4) * 35;
+          const px = tx + vx * dp, py = ty + 40 - vy0 * dp + 260 * dp * dp;
+          ctx.globalAlpha = (1 - dp) * 0.9;
+          ctx.fillStyle = i % 2 ? '#8a8a96' : c;
+          ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fill();
+        }
+      }
       break;
     }
-    case 'slashx': { // 交叉剑气 X
+    case 'slashx': { // 交叉双斩: 交叉剑气X + 两道先后飞出的月牙剑气 + 第二斩小X
+      const ang = Math.atan2(dy, dx);
+      for (let b = 0; b < 2; b++) { // 月牙剑气: 一正弧一反弧, 错峰飞出
+        const bt = win(t, 0.06 + b * 0.28, 0.6 + b * 0.28);
+        if (bt <= 0) continue;
+        const bx = gx + dx * (0.25 + bt * 0.75), by = gy + dy * (0.25 + bt * 0.75) + (b ? -16 : 16);
+        ctx.globalAlpha = (1 - bt * 0.7) * Math.min(1, t * 6);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.arc(bx, by, 26, ang - 1.0 + b * Math.PI, ang + 1.0 + b * Math.PI); ctx.stroke();
+        ctx.strokeStyle = c; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(bx, by, 31, ang - 1.0 + b * Math.PI, ang + 1.0 + b * Math.PI); ctx.stroke();
+      }
       const grow = Math.min(1, t * 1.5);
       ctx.lineCap = 'round';
       for (let k = -1; k <= 1; k += 2) {
@@ -1412,9 +1715,21 @@ function drawWeaponFx(t, now, gx, gy, tx, ty, attX, attY, attH) {
         ctx.lineTo(tx + 90 * grow, ty + 90 * grow * k);
         ctx.stroke();
       }
+      const t2 = win(t, 0.32, 0.95); // 第二斩: 反向小X紧随(双斩要斩得出"两次")
+      if (t2 > 0) {
+        const g3 = Math.min(1, t2 * 1.6) * 0.62;
+        ctx.globalAlpha = g3 * (1 - Math.max(0, t2 - 0.8) * 3);
+        for (let k = -1; k <= 1; k += 2) {
+          ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.moveTo(tx - 66 * g3, ty + 66 * g3 * k);
+          ctx.lineTo(tx + 66 * g3, ty - 66 * g3 * k);
+          ctx.stroke();
+        }
+      }
       break;
     }
-    default: { // dash 直拳冲击波环
+    default: { // dash 快拳连打: 拳芒冲击环+出拳速度线+第二拳在守方处小爆
       const ring = Math.min(1, t * 1.4);
       const fistX = gx + ux * 46, fistY = gy + uy * 46;
       const g3 = ctx.createRadialGradient(fistX, fistY, 0, fistX, fistY, 40);
@@ -1425,6 +1740,23 @@ function drawWeaponFx(t, now, gx, gy, tx, ty, attX, attY, attH) {
       ctx.strokeStyle = c; ctx.lineWidth = 6 * (1 - ring) + 2;
       ctx.globalAlpha = 1 - ring;
       ctx.beginPath(); ctx.arc(fistX, fistY, 24 + ring * 110, 0, Math.PI * 2); ctx.stroke();
+      if (t < 0.55) { // 出拳速度线(三条短流光)
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        for (let i = 0; i < 3; i++) {
+          ctx.globalAlpha = Math.max(0, 0.6 - t) * (0.8 - i * 0.25);
+          const ly = gy - 18 + i * 18;
+          ctx.beginPath(); ctx.moveTo(gx + 30 + i * 16 + t * 70, ly); ctx.lineTo(gx + 96 + i * 16 + t * 70, ly); ctx.stroke();
+        }
+      }
+      const t2 = win(t, 0.48, 1); // 第二拳小爆(连打的"打"字落点)
+      if (t2 > 0) {
+        ctx.strokeStyle = c; ctx.lineWidth = 5 * (1 - t2) + 1;
+        ctx.globalAlpha = (1 - t2) * 0.9;
+        ctx.beginPath(); ctx.arc(tx, ty, 10 + t2 * 58, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.globalAlpha = (1 - t2) * 0.5;
+        ctx.beginPath(); ctx.arc(tx, ty, 8 * (1 - t2) + 2, 0, Math.PI * 2); ctx.fill();
+      }
     }
   }
   ctx.restore();

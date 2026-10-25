@@ -15,14 +15,16 @@ const TIDX = {平野:0,草地:1,竹林:2,水泽:3,雪地:4,石板:5,城墙:6,屋
 
 // 武功: {名,威力,命中,会心,射程:[近,远],耗内,气势需求,类型}
 // anim: 机战式横版战斗动画配置(纯表现参数,渲染在main.js)
-//   dash=突进直拳  sweep=横扫弧光  dragon=龙形气劲  beam=光束  bullet=弹丸
-//   wave=环形气浪  stab=突刺  smash=下砸  slashx=交叉剑气
+//   kind: dash=快拳连打 sweep=横扫弧光 dragon=双掌龙形气劲 beam=凝指点射(光束) bullet=瞄准射击(弹丸)
+//         wave=云手气浪 stab=瞬步突刺 smash=跃起下砸 slashx=交叉双斩
+//   P1-12: 每种 kind 配专属 puppet 动作编排+程序特效(main.js ATT_POSES/drawWeaponFx)
+//   beams=N: 六道剑气类扇形齐发(缺省单道); 其余可选表现参数同层扩展
 const WEAPONS = {
   changquan:  {name:'太祖长拳',   pow:1200, hit:90, crit:10, rng:[1,1], cost:0,  will:0,   type:'外', anim:{kind:'dash',   color:'#ffb84a'}},
   dagou:      {name:'打狗棒法',   pow:2100, hit:85, crit:15, rng:[1,1], cost:10, will:0,   type:'外', anim:{kind:'sweep',  color:'#8fd08f'}},
   xianglong:  {name:'降龙十八掌', pow:3600, hit:80, crit:20, rng:[1,2], cost:35, will:110, type:'外', anim:{kind:'dragon', color:'#ffd24a'}},
   kongming:   {name:'空明拳',     pow:1900, hit:90, crit:10, rng:[1,1], cost:8,  will:0,   type:'外', anim:{kind:'wave',   color:'#9ad0ff'}},
-  liumai:     {name:'六脉神剑',   pow:2900, hit:80, crit:25, rng:[2,4], cost:35, will:0,   type:'内', anim:{kind:'beam',   color:'#6cf0ff'}},
+  liumai:     {name:'六脉神剑',   pow:2900, hit:80, crit:25, rng:[2,4], cost:35, will:0,   type:'内', anim:{kind:'beam',   color:'#6cf0ff', beams:6}},
   bishou:     {name:'匕首',       pow:800,  hit:85, crit:10, rng:[1,1], cost:0,  will:0,   type:'外', anim:{kind:'stab',   color:'#d0d8e8'}},
   huoqiang:   {name:'火枪',       pow:2400, hit:75, crit:20, rng:[2,4], cost:0,  will:0,   type:'奇', ammo:5, anim:{kind:'bullet', color:'#ffcf6a'}},
   canpu:      {name:'残谱一式',   pow:2000, hit:85, crit:15, rng:[1,2], cost:15, will:0,   type:'奇', anim:{kind:'slashx', color:'#c89aff'}},
