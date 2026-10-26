@@ -57,23 +57,33 @@ const verify = (name, ok, detail) => console.log(`VERIFY ${name}: ${ok ? 'OK' : 
   };
   // 只点可见菜单按钮(隐藏的旧按钮点了会复活旧选中态)
   const clickMenuItem = async (match) => {
-    const ok = await page.evaluate((m) => {
-      const menu = document.getElementById('actionMenu');
-      if (!menu || menu.classList.contains('hidden')) return false;
-      const b = [...menu.querySelectorAll('button')].find(b => b.textContent.includes(m));
-      if (b) { b.click(); return true; } return false;
-    }, match);
-    await sleep(400); return ok;
+    // P2-13: 移动改插值后菜单出现时机变长, 轮询等菜单真出现再点(不再赌固定sleep)
+    for (let i = 0; i < 25; i++) {
+      const ok = await page.evaluate((m) => {
+        const menu = document.getElementById('actionMenu');
+        if (!menu || menu.classList.contains('hidden')) return false;
+        const b = [...menu.querySelectorAll('button')].find(b => b.textContent.includes(m));
+        if (b) { b.click(); return true; } return false;
+      }, match);
+      if (ok) { await sleep(300); return true; }
+      await sleep(150);
+    }
+    return false;
   };
   // 按文字选预测列表项(武功), 可见才点
   const pickWeapon = async (match) => {
-    const ok = await page.evaluate((m) => {
-      const f = document.getElementById('forecast');
-      if (!f || f.classList.contains('hidden')) return false;
-      const it = [...f.querySelectorAll('#fList .witem')].find(w => w.textContent.includes(m));
-      if (it) { it.click(); return true; } return false;
-    }, match);
-    await sleep(400); return ok;
+    // P2-13: 同上去抖 — 武功预测列表出现后轮询点选
+    for (let i = 0; i < 25; i++) {
+      const ok = await page.evaluate((m) => {
+        const f = document.getElementById('forecast');
+        if (!f || f.classList.contains('hidden')) return false;
+        const it = [...f.querySelectorAll('#fList .witem')].find(w => w.textContent.includes(m));
+        if (it) { it.click(); return true; } return false;
+      }, match);
+      if (ok) { await sleep(300); return true; }
+      await sleep(150);
+    }
+    return false;
   };
   const unitState = (key) => page.evaluate((k) => {
     const u = G.units.find(v => v.key === k);

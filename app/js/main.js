@@ -23,6 +23,16 @@ const FX = { portrait: null, bigText: '', bigCrit: false,
              hpAnim: null,    // HP逐格递减 {u,from,to,t0,per,crit}
              ringFx: null,    // P1-6: 运功角色色环 {x,y,color,t0,until}
              floats: [] };    // 伤害飘字(由draw统一渲染)
+FX.dust = [];                 // P2-13: 移动扬尘 {wx,wy,t0,seed}
+
+// P2-13: FE 式地图单位动画(纯表现层零素材, 引擎零改动)
+// 待机呼吸 squash-stretch / 移动步伐摆动+扬尘 / 选中快节奏踏步 / 敌入射程攻击架势 / 按行动方向翻转朝向
+const UAN = { breatheA: 0.022, breatheT: 1100,   // 待机呼吸: squash幅度/周期(相位按单位id错开)
+              selHopT: 240, selHopY: 2.6,        // 选中踏步: 快节奏原地小跳(FE 光标下的待命感)
+              stepSquash: 0.07, stepLean: 0.05,  // 移动: 步伐squash/上身前倾
+              tileMs: 130, dustLife: 430 };      // 每格移动耗时/扬尘寿命
+const FACE = {};                // u.id → 1(朝右)/-1(朝左); 缺省我方朝右/敌方朝左
+let MAP_MOVE = null;            // 地图移动动画 {u,x0,y0,x1,y1,t0,dur,lastStep}
 
 // ============ B2: 机战式横版战斗场景 ============
 // 攻击确认后切入: 战场压暗为背景+电影黑边, 攻方立绘左/守方立绘右(守方镜像),
@@ -723,6 +733,36 @@ function hpAnimValue(now) {
 }
 
 // ---------- 渲染 ----------
+// P2-13: 朝向读取/写回(缺省我方面朝右/敌方面朝左, 行动按方向翻转)
+function unitFace(u) { return FACE[u.id] || (u.side === 'player' ? 1 : -1); }
+function setFace(u, dir) { if (dir) FACE[u.id] = dir; }
+// P2-13: 敌入射程判定 — 任一武功够得着任一我方单位即返回最近目标(攻击架势用)
+function stanceTarget(u) {
+  let best = null, bd = 1e9;
+  for (const f of G.units) {
+    if (f.hp <= 0 || f.side !== 'player') continue;
+    const d = Math.abs(f.x - u.x) + Math.abs(f.y - u.y);
+    if (d >= bd) continue;
+    for (const wid of u.weapons) {
+      const w = WEAPONS[wid];
+      if (d >= w.rng[0] && d <= w.rng[1]) { best = f; bd = d; break; }
+    }
+  }
+  return best;
+}
+function spawnDust(wx, wy, now) { FX.dust.push({ wx, wy, t0: now, seed: FX.dust.length % 7 }); }
+// P2-13: 地图单位移动 — FE 式步伐插值替原瞬移+sleep, 落定才提交坐标(中途读位置仍是旧格)
+async function animUnitMove(u, nx, ny) {
+  const dist = Math.abs(nx - u.x) + Math.abs(ny - u.y);
+  if (!dist) return;
+  if (nx !== u.x) setFace(u, nx > u.x ? 1 : -1);
+  MAP_MOVE = { u, x0: u.x, y0: u.y, x1: nx, y1: ny,
+               t0: performance.now(), dur: Math.max(200, dist * UAN.tileMs), lastStep: -1 };
+  await sleep(MAP_MOVE.dur + 40);
+  u.x = nx; u.y = ny;
+  if (MAP_MOVE && MAP_MOVE.u === u) MAP_MOVE = null;
+  spawnDust(nx * TS + TS / 2, ny * TS + TS - 6, performance.now());  // 落定一团尘
+}
 function draw() {
   const now = performance.now();
   ctx.clearRect(0, 0, cv.width, cv.height);
@@ -858,17 +898,47 @@ function draw() {
     ctx.strokeRect(x * TS + 2, y * TS + 2, TS - 4, TS - 4);
   }
   // 单位
-  const t = performance.now() / 300;
   // P2-10: 单位占比 64→78px — FE/SRW 惯例: 人物略溢格边才有战场体积感。
   // 脚底锚定(底部对齐格底-2), 头顶自然探入上一格; 框/HP条仍按格子画(格子标记≠人物轮廓)
   const US = 78;
   for (const u of G.units) {
     if (u.hp <= 0) continue;
-    const bob = Math.sin(t + u.id) * 1.5;
     const im = sprites[u.sprite];
+    // ---- P2-13: 本帧姿态 — 移动插值/选中踏步/敌架势/待机呼吸 + 朝向翻转 ----
+    const face = unitFace(u);
+    let gx = u.x, gy = u.y;      // 绘制格位(移动动画期间为小数插值)
+    let squash = 1, lean = 0, hopY = 0;
+    const m = MAP_MOVE;
+    if (m && m.u === u) {
+      const p = win(now, m.t0, m.t0 + m.dur);
+      gx = m.x0 + (m.x1 - m.x0) * p;
+      gy = m.y0 + (m.y1 - m.y0) * p;
+      const dist = Math.abs(m.x1 - m.x0) + Math.abs(m.y1 - m.y0);
+      const stepPh = p * dist * 2;                          // 每格两步, 落足点交替
+      squash = 1 - UAN.stepSquash * Math.abs(Math.sin(Math.PI * stepPh));
+      lean = UAN.stepLean;                                  // 上身前倾朝行进向
+      const st = Math.floor(stepPh);
+      if (st > m.lastStep) {                                // 每次落足扬尘(脚步踩得到地面)
+        m.lastStep = st;
+        spawnDust(gx * TS + TS / 2 - face * 12, gy * TS + TS - 6, now);
+      }
+    } else if (Sel.unit === u) {
+      // 选中: FE 式快节奏原地踏步(小跳+轮替squash, 光标下的单位是"待命"不是站桩)
+      const ph = (now % (UAN.selHopT * 2)) / UAN.selHopT;  // 0..2 一轮两拍
+      hopY = -Math.abs(Math.sin(Math.PI * ph)) * UAN.selHopY;
+      squash = 1 - 0.03 * Math.sin(2 * Math.PI * ph);
+    } else if (u.side === 'enemy' && stanceTarget(u)) {
+      // 敌入射程: 攻击架势 — 沉身前倾朝最近可及我方, 呼吸压平(临战感, FE 敌兵举刀待发)
+      const tgt = stanceTarget(u);
+      if (tgt.x !== u.x) setFace(u, tgt.x > u.x ? 1 : -1);
+      squash = 0.96; lean = 0.06;
+    } else {
+      // 待机呼吸 squash-stretch — 脚底锚定, 相位按单位id错开(整队不整齐划一)
+      squash = 1 + UAN.breatheA * Math.sin(now / UAN.breatheT * 2 * Math.PI + u.id * 1.93);
+    }
     if (u.side === 'enemy') { // 敌方红框
       ctx.strokeStyle = '#d04030'; ctx.lineWidth = 2;
-      ctx.strokeRect(u.x * TS + 3, u.y * TS + 3, TS - 6, TS - 6);
+      ctx.strokeRect(gx * TS + 3, gy * TS + 3, TS - 6, TS - 6);
     }
     if (Sel.unit === u) {
       // P2-9: 选中呼吸 — 外圈金光按正弦明灭(200ms 相位), 选中态是活的不是油漆框
@@ -876,32 +946,55 @@ function draw() {
       ctx.save();
       ctx.globalAlpha = pulse * 0.55;
       ctx.strokeStyle = '#fff8c0'; ctx.lineWidth = 6;
-      ctx.strokeRect(u.x * TS + 2, u.y * TS + 2, TS - 4, TS - 4);
+      ctx.strokeRect(gx * TS + 2, gy * TS + 2, TS - 4, TS - 4);
       ctx.restore();
       ctx.strokeStyle = '#ffe070'; ctx.lineWidth = 3;
-      ctx.strokeRect(u.x * TS + 2, u.y * TS + 2, TS - 4, TS - 4);
+      ctx.strokeRect(gx * TS + 2, gy * TS + 2, TS - 4, TS - 4);
     }
-    if (im.complete)
-      ctx.drawImage(im, u.x * TS + (TS - US) / 2, u.y * TS + TS - US - 2 + bob, US, US);
-    // HP 条 + 气势
+    if (im.complete) {
+      const h = US * squash;
+      ctx.save();
+      ctx.translate(gx * TS + TS / 2, gy * TS + TS - 2 + hopY);  // 脚底锚定
+      if (lean) ctx.rotate(lean * face);                          // 前倾朝面朝向
+      ctx.scale(face, 1);                                         // 按朝向水平翻转
+      ctx.drawImage(im, -US / 2, -h, US, h);
+      ctx.restore();
+    }
+    // HP 条 + 气势(移动插值期间跟着人物走)
     const bw = TS - 10;
     // B1 演出期间: 条与数字都走逐格动画的当前值, 演出关闭时直接用真实值
     const disp = (fxOn && FX.hpAnim && FX.hpAnim.u === u) ? hpAnimValue(now) : u.hp;
-    ctx.fillStyle = '#202028'; ctx.fillRect(u.x * TS + 5, u.y * TS + TS - 8, bw, 4);
+    ctx.fillStyle = '#202028'; ctx.fillRect(gx * TS + 5, gy * TS + TS - 8, bw, 4);
     ctx.fillStyle = u.side === 'player' ? '#50c060' : '#d05040';
-    ctx.fillRect(u.x * TS + 5, u.y * TS + TS - 8, bw * (Math.max(0, disp) / u.maxhp), 4);
-    ctx.fillStyle = '#202028'; ctx.fillRect(u.x * TS + 5, u.y * TS + TS - 3, bw, 2);
+    ctx.fillRect(gx * TS + 5, gy * TS + TS - 8, bw * (Math.max(0, disp) / u.maxhp), 4);
+    ctx.fillStyle = '#202028'; ctx.fillRect(gx * TS + 5, gy * TS + TS - 3, bw, 2);
     ctx.fillStyle = '#e8c85a';
-    ctx.fillRect(u.x * TS + 5, u.y * TS + TS - 3, bw * (u.will / 150), 2);
+    ctx.fillRect(gx * TS + 5, gy * TS + TS - 3, bw * (u.will / 150), 2);
     ctx.fillStyle = u.side === 'player' ? '#cfe0ff' : '#ffc8b8';
     ctx.font = '11px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(u.cn, u.x * TS + TS / 2, u.y * TS + 10);
+    ctx.fillText(u.cn, gx * TS + TS / 2, gy * TS + 10);
     // B1 扣血中的数字同步跳动(会心红字)
     if (fxOn && FX.hpAnim && FX.hpAnim.u === u) {
       ctx.font = 'bold 16px monospace';
       ctx.fillStyle = FX.hpAnim.crit ? '#ff5040' : '#fff8e0';
-      ctx.fillText(Math.max(0, disp), u.x * TS + TS / 2, u.y * TS + TS - 14);
+      ctx.fillText(Math.max(0, disp), gx * TS + TS / 2, gy * TS + TS - 14);
     }
+  }
+  // P2-13: 移动扬尘 — 落足小尘团渐扩渐淡(程序绘制零素材)
+  if (FX.dust.length) {
+    for (const d of FX.dust) {
+      const age = now - d.t0;
+      if (age < 0 || age > UAN.dustLife) continue;
+      const p = age / UAN.dustLife;
+      const j = (d.seed % 3 - 1) * 3;
+      ctx.globalAlpha = (1 - p) * 0.5;
+      ctx.fillStyle = '#ddd2bc';
+      ctx.beginPath();
+      ctx.arc(d.wx + j * p, d.wy - 8 * p, 3 + 5.5 * p, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    FX.dust = FX.dust.filter(d => now - d.t0 <= UAN.dustLife);
   }
   // 伤害飘字(B1: 由draw统一渲染, 与战场同一坐标系)
   ctx.font = 'bold 22px monospace'; ctx.textAlign = 'center';
@@ -2066,10 +2159,7 @@ async function enemyPhase() {
     if (G.over) return;
     const plan = enemyPlan(u);
     if (!plan) continue;
-    if (plan.kind === 'move' || plan.x !== u.x || plan.y !== u.y) {
-      u.x = plan.x; u.y = plan.y;
-      await sleep(320);
-    }
+    if (plan.x !== u.x || plan.y !== u.y) await animUnitMove(u, plan.x, plan.y); // P2-13: 步伐插值替瞬移
     if (plan.kind === 'attack' && plan.target.hp > 0) {
       // 敌方运功AI: 引擎决策, 这里扣真气挂buff(与玩家运功同一条路)
       const sid = enemySpirit(u, plan.target);
@@ -2164,6 +2254,8 @@ cv.addEventListener('click', async () => {
   // P1-8: 开场镜头进行中点击 = 直接收场(不吃掉这次点击做选中)
   if (INTRO.active) { INTRO.active = false; return; }
   if (G.over || G.phase !== 'player') return;
+  // P2-13: 移动演出进行中锁输入, 防点了白点/吃到旧菜单
+  if (MAP_MOVE) return;
   const { x, y } = mouse;
   if (x < 0 || x >= W || y < 0 || y >= H) return;
   const u = G.units.find(v => v.hp > 0 && v.x === x && v.y === y);
@@ -2197,10 +2289,13 @@ cv.addEventListener('click', async () => {
   }
   // 已选中,点击移动范围 = 移动并展开菜单
   if (Sel.unit && Sel.moveTiles && Sel.moveTiles[x + ',' + y] !== undefined && !u) {
-    Sel.unit.x = x; Sel.unit.y = y;
+    // P2-13: FE 式步伐插值移动替瞬移, 落定才展开指令菜单
+    const mu = Sel.unit;
     Sel.moveTiles = null;
-    await sleep(250);
-    openMenu(Sel.unit);
+    hideMenus();
+    await animUnitMove(mu, x, y);
+    if (Sel.unit !== mu) return;
+    openMenu(mu);
     return;
   }
   // 点空白取消
