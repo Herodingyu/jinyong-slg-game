@@ -16,7 +16,18 @@ const portraits = {};
   const im = new Image(); im.src = 'assets/portraits/' + k + '.png'; portraits[k] = im;
 });
 // 机战式演出台词状态: draw() 每帧读取, 时间轴由 animateEvent 写入
-let fxOn = true;
+// P3-11: 演出/音乐/反击三开关持久化到 localStorage; node 测试台无 localStorage 时静默降级
+const _store = (typeof localStorage !== 'undefined') ? localStorage : null;
+function loadSwitch(key, dft) {
+  if (!_store) return dft;
+  const v = _store.getItem('jy_' + key);
+  return v === null ? dft : v === '1';
+}
+function saveSwitch(key, val) {
+  if (!_store) return;
+  try { _store.setItem('jy_' + key, val ? '1' : '0'); } catch (e) {}
+}
+let fxOn = loadSwitch('fx', true);
 const FX = { portrait: null, bigText: '', bigCrit: false,
              cutinT0: 0, cutinUntil: 0, flashT0: 0, flashUntil: 0, shakeUntil: 0,
              miniOn: false,   // 攻击事件期间战场缩略图置底模式
@@ -50,6 +61,8 @@ const FIGHT = { active: false, ev: null, t0: 0, crit: false, isMiss: false, spar
 
 // P1-8: 开场镜头调度 — 开场横幅后镜头变焦扫场(我方→敌方→BOSS→归位) + 敌我位置脉冲
 const INTRO = { active: false, t0: 0, dur: 3400 };
+// P3-11b: 评价结算画面(机战式战斗结果; 胜负判定在 checkEnd, 内容配置在 data.js RESULT_CFG)
+const RESULT = { active: false, t0: 0 };
 // 镜头参数: 世界点P映射到屏幕 = C + pan + s·(P−C)。关键帧给"想看的兴趣点",
 // pan 钳制在不留空边范围内(画布=地图尺寸, 变焦 1.45 换扫场空间)
 function introCam(ip) {
@@ -686,7 +699,7 @@ const Sel = {
 const mouse = { x: -1, y: -1 };
 
 // ---------- 音频: WebAudio 简易合成 ----------
-let AC = null, bgmTimer = null, bgmOn = true;
+let AC = null, bgmTimer = null, bgmOn = loadSwitch('bgm', true);
 const MOTIF = { // 每人一句五声音阶动机(占位出阵曲)
   xiaofeng:  [220,262,294,262,220,196,220,0],
   guojing:   [196,220,262,220,196,175,196,0],
@@ -1103,7 +1116,106 @@ function draw() {
   if (TITLE.active) drawTitleCard(now);
   if (DLG.active) drawDialogBox(now);
   if (SORTIE.active) drawSortie(now);
+  // P3-11b: 评价结算画面(最顶层; 点击重开)
+  if (RESULT.active) drawResult(now);
   requestAnimationFrame(draw);
+}
+
+// ============ P3-11b: 评价结算画面(机战式战斗结果, 程序绘制零素材; 内容在 data.js RESULT_CFG) ============
+// 入场编排: 幕布→章名/任务完成→三项战绩逐行→评价大字弹入→收尾旁白→重开提示; 点击画面重开一局
+function drawResult(now) {
+  const p = now - RESULT.t0;
+  const CW = cv.width, CH = cv.height;
+  const KAI = '"KaiTi","STKaiti","Microsoft YaHei",serif';
+  // 深蓝夜幕底(序章雪夜同题材) + 冷月光晕
+  ctx.fillStyle = '#0a0e1c';
+  ctx.fillRect(0, 0, CW, CH);
+  const mg = ctx.createRadialGradient(CW / 2, CH * 0.30, 0, CW / 2, CH * 0.30, 260);
+  mg.addColorStop(0, 'rgba(150,180,255,0.14)'); mg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = mg;
+  ctx.fillRect(0, 0, CW, CH);
+  ctx.textAlign = 'center';
+  const fadeIn = win(p, 0, 450);
+
+  // 章名 + 任务完成
+  ctx.globalAlpha = fadeIn * win(p, 150, 500);
+  ctx.font = `20px ${KAI}`;
+  ctx.fillStyle = '#c8b060';
+  ctx.fillText(STORY.chapterNo + ' · ' + STORY.chapterTitle, CW / 2, 118);
+  ctx.globalAlpha = fadeIn * win(p, 300, 750);
+  ctx.font = `bold 54px ${KAI}`;
+  ctx.fillStyle = '#ffd24a';
+  ctx.shadowColor = 'rgba(255,210,74,0.55)'; ctx.shadowBlur = 22;
+  ctx.fillText(RESULT_CFG.victoryTitle, CW / 2, 185);
+  ctx.shadowBlur = 0;
+  // 金漆分隔线
+  ctx.globalAlpha = fadeIn * win(p, 550, 800);
+  ctx.strokeStyle = '#8a7430'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(CW * 0.20, 214); ctx.lineTo(CW * 0.80, 214); ctx.stroke();
+
+  // 三项战绩逐行入场(击破/说得/回合)
+  const foesTotal = INITIAL_UNITS.filter(e => CHAR_DATA[e.tpl || e.key].side === 'enemy').length;
+  const rows = [
+    ['击破敌军', `${G.stats.kills} / ${foesTotal}`],
+    ['说得', `${G.stats.speaks} / 1`],
+    ['使用回合', `${G.turn}`],
+  ];
+  rows.forEach((r, i) => {
+    const a = fadeIn * win(p, 750 + i * 260, 1000 + i * 260);
+    if (a <= 0) return;
+    const y = 268 + i * 46;
+    ctx.globalAlpha = a * 0.85;
+    ctx.font = `24px ${KAI}`;
+    ctx.fillStyle = '#d8dce8';
+    ctx.textAlign = 'right';
+    ctx.fillText(r[0], CW * 0.46, y);
+    ctx.textAlign = 'left';
+    ctx.font = `bold 26px ${KAI}`;
+    ctx.fillStyle = '#fff8e0';
+    ctx.fillText(r[1], CW * 0.50, y);
+    ctx.textAlign = 'center';
+  });
+
+  // 评价大字(回合定档, data.js RESULT_CFG.ranks; 弹入过冲)
+  const rk = RESULT_CFG.ranks.find(r => G.turn <= r.maxTurns) || RESULT_CFG.ranks[RESULT_CFG.ranks.length - 1];
+  const ra = fadeIn * win(p, 1650, 1950);
+  if (ra > 0) {
+    const pop = 1 + (1 - easeOutBack(win(p, 1650, 1950))) * 0.6;
+    ctx.save();
+    ctx.translate(CW * 0.76, 330);
+    ctx.scale(pop, pop);
+    ctx.globalAlpha = ra;
+    ctx.font = `bold 128px ${KAI}`;
+    const rankColor = rk.rank === 'S' ? '#ffd24a' : (rk.rank === 'A' ? '#8fd08f' : (rk.rank === 'B' ? '#7ab8ff' : '#b8a0c0'));
+    ctx.fillStyle = rankColor;
+    ctx.shadowColor = rankColor; ctx.shadowBlur = 30;
+    ctx.fillText(rk.rank, 0, 0);
+    ctx.restore();
+    ctx.globalAlpha = ra * win(p, 1950, 2250);
+    ctx.font = `22px ${KAI}`;
+    ctx.fillStyle = '#c8b060';
+    ctx.fillText('评 价', CW * 0.76, 400);
+    ctx.globalAlpha = ra * win(p, 2150, 2450);
+    ctx.font = `19px ${KAI}`;
+    ctx.fillStyle = '#a8b0c8';
+    ctx.fillText(rk.blurb, CW * 0.76, 434);
+  }
+
+  // 收尾旁白(机战式结尾定格) + 重开提示
+  RESULT_CFG.ending.forEach((line, i) => {
+    const a = fadeIn * win(p, 2550 + i * 380, 2850 + i * 380);
+    if (a <= 0) return;
+    ctx.globalAlpha = a * 0.95;
+    ctx.font = `${i === 0 ? '22px' : '26px'} ${KAI}`;
+    ctx.fillStyle = i === 0 ? '#d8dce8' : '#c8b060';
+    ctx.fillText(line, CW / 2, CH - 150 + i * 40);
+  });
+  const ha = fadeIn * win(p, 3400, 3700) * (0.65 + 0.35 * Math.sin(p / 320));
+  ctx.globalAlpha = Math.max(0, ha);
+  ctx.font = `18px ${KAI}`;
+  ctx.fillStyle = '#8a94b0';
+  ctx.fillText('点击画面 重新开始', CW / 2, CH - 34);
+  ctx.globalAlpha = 1;
 }
 
 // ============ FIGHT 背景: 雪夜战场全景(程序绘制, 零素材) ============
@@ -2011,6 +2123,7 @@ async function doSpeak(u, target) {
   target.speakable = false;
   target.hp = Math.min(target.maxhp, target.hp + Math.round(target.maxhp * 0.3));
   target.acted = true;
+  G.stats.speaks++; // P3-11b: 说得计数(评价结算)
   log(`<span style="color:#8fd08f">说得成功！${target.cn}加入我方</span>`);
   playMotif(target);
   finishUnit(u, true);
@@ -2121,7 +2234,7 @@ function finishUnit(u, keepMenuOpen) {
 
 // 反击询问
 // P0-2: 反击自动决策(期望命中×伤害最大); 手动模式走原弹窗
-let AUTO_COUNTER = true;
+let AUTO_COUNTER = loadSwitch('counter', true);
 let lastHover = '';
 function askCounter(def, att) {
   const opts = counterWeapons(def, att);
@@ -2208,8 +2321,9 @@ function checkEnd() {
   const hero = G.units.find(v => v.key === 'hero');
   if (bossDead) {
     G.over = true; G.result = 'win';
-    banner('段延庆击破！ 危机解除', 3000);
-    setTimeout(() => alert('过关！\n\n「今夕是何年？」萧峰望着天边的飞雪。\n\n——序章完——\n（原型演示结束，更多章节见策划案）'), 1500);
+    banner('段延庆击破！ 危机解除', 1600);
+    // P3-11b: 机战式评价结算画面替原生 alert(AUDIT#14); 等击破 banner 落定后入场
+    setTimeout(() => { RESULT.active = true; RESULT.t0 = performance.now(); }, 1500);
   } else if (!playersAlive || (hero && hero.hp <= 0)) {
     G.over = true; G.result = 'lose';
     banner('我方全灭……', 3000);
@@ -2249,6 +2363,8 @@ cv.addEventListener('mouseleave', () => { mouse.x = -1; });
 cv.addEventListener('click', async () => {
   // P3-11a: 剧情演出期间点击=推进(补全/翻页/跳段), 不吃成选中
   if (TITLE.active || DLG.active || SORTIE.active) { inputPulse++; return; }
+  // P3-11b: 评价结算画面点击 = 重新开始(序章打完即一局终了)
+  if (RESULT.active) { location.reload(); return; }
   // P1-10: 演出期间点击=跳过(最优先; 敌方回合演出也能跳)
   if (FIGHT.active) { FIGHT.skip = true; return; }
   // P1-8: 开场镜头进行中点击 = 直接收场(不吃掉这次点击做选中)
@@ -2317,15 +2433,18 @@ document.getElementById('endTurn').onclick = () => {
 };
 document.getElementById('bgmBtn').onclick = e => {
   bgmOn = !bgmOn;
+  saveSwitch('bgm', bgmOn); // P3-11: 持久化
   e.target.textContent = '音乐:' + (bgmOn ? '开' : '关');
   if (!bgmOn) beepStop();
 };
 document.getElementById('fxBtn').onclick = e => {
   fxOn = !fxOn;
+  saveSwitch('fx', fxOn); // P3-11: 持久化
   e.target.textContent = '演出:' + (fxOn ? '开' : '关');
 };
 document.getElementById('counterBtn').onclick = e => {
   AUTO_COUNTER = !AUTO_COUNTER;
+  saveSwitch('counter', AUTO_COUNTER); // P3-11: 持久化
   e.target.textContent = '反击:' + (AUTO_COUNTER ? '自动' : '手动');
 };
 document.getElementById('helpBtn').onclick = () => {
@@ -2397,6 +2516,10 @@ async function playLine() {
 }
 
 // ---------- 初始化 ----------
+// P3-11: 恢复上次开关状态后同步按钮文案(刷新后不再全部回到默认开)
+document.getElementById('fxBtn').textContent = '演出:' + (fxOn ? '开' : '关');
+document.getElementById('bgmBtn').textContent = '音乐:' + (bgmOn ? '开' : '关');
+document.getElementById('counterBtn').textContent = '反击:' + (AUTO_COUNTER ? '自动' : '手动');
 G.units = INITIAL_UNITS.map(makeUnit);
 G.units.forEach(u => u.weapons.forEach(wid => { const w = WEAPONS[wid]; if (w.ammo !== undefined) u.ammo[w.name] = w.ammo; }));
 updateTop();

@@ -102,7 +102,10 @@ function resolveAttack(att, def, w, opts) {
     if (def.buffs.halfDmg) { dmg = Math.ceil(dmg / 2); }
     def.hp -= dmg;
     const killed = def.hp <= 0;
-    if (killed) { def.hp = 0; att.will = Math.min(att.maxwill, att.will + 4); }
+    if (killed) {
+      def.hp = 0; att.will = Math.min(att.maxwill, att.will + 4);
+      if (att.side === 'player') G.stats.kills++; // P3-11b: 我方击破计数(评价结算)
+    }
     else { att.will = Math.min(att.maxwill, att.will + 1); def.will = Math.min(def.maxwill, def.will + 1); }
     if (w.ammo !== undefined) att.ammo[w.name] = (att.ammo[w.name] ?? w.ammo) - 1;
     return { type: 'hit', att, def, w, dmg, isCrit, killed };
@@ -225,4 +228,6 @@ function comboTargets(u) {
 
 const G = {
   units: [], turn: 1, phase: 'player', over: false, comboUsed: false, result: null,
+  // P3-11b: 评价结算数据源(AUDIT#14)。击破数在 resolveAttack 结算, 说得数在 doSpeak 结算
+  stats: { kills: 0, speaks: 0 },
 };
