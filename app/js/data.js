@@ -24,7 +24,7 @@ const WEAPONS = {
   dagou:      {name:'打狗棒法',   pow:2100, hit:85, crit:15, rng:[1,1], cost:10, will:0,   type:'外', anim:{kind:'sweep',  color:'#8fd08f'}},
   xianglong:  {name:'降龙十八掌', pow:3600, hit:80, crit:20, rng:[1,2], cost:35, will:110, type:'外', anim:{kind:'dragon', color:'#ffd24a'}},
   kongming:   {name:'空明拳',     pow:1900, hit:90, crit:10, rng:[1,1], cost:8,  will:0,   type:'外', anim:{kind:'wave',   color:'#9ad0ff'}},
-  liumai:     {name:'六脉神剑',   pow:2900, hit:80, crit:25, rng:[2,4], cost:35, will:0,   type:'内', anim:{kind:'beam',   color:'#6cf0ff', beams:6}},
+  liumai:     {name:'六脉神剑',   pow:2900, hit:80, crit:25, rng:[2,4], cost:45, will:0,   type:'内', anim:{kind:'beam',   color:'#6cf0ff', beams:6}},
   bishou:     {name:'匕首',       pow:800,  hit:85, crit:10, rng:[1,1], cost:0,  will:0,   type:'外', anim:{kind:'stab',   color:'#d0d8e8'}},
   huoqiang:   {name:'火枪',       pow:2400, hit:75, crit:20, rng:[2,4], cost:0,  will:0,   type:'奇', ammo:5, anim:{kind:'bullet', color:'#ffcf6a'}},
   canpu:      {name:'残谱一式',   pow:2000, hit:85, crit:15, rng:[1,2], cost:15, will:0,   type:'奇', anim:{kind:'slashx', color:'#c89aff'}},
@@ -32,6 +32,8 @@ const WEAPONS = {
   langyabang: {name:'狼牙棒',     pow:1900, hit:75, crit:15, rng:[1,1], cost:5,  will:0,   type:'外', anim:{kind:'smash',  color:'#b89060'}},
   tiezhang:   {name:'铁杖',       pow:2600, hit:85, crit:15, rng:[1,2], cost:10, will:0,   type:'外', anim:{kind:'smash',  color:'#707a90'}},
   yiyang:     {name:'一阳指',     pow:3400, hit:80, crit:20, rng:[1,3], cost:20, will:0,   type:'内', anim:{kind:'beam',   color:'#fff8d0'}},
+  // P3-12a BOSS 阶段技: 段延庆半血解锁的看家大招(赤红指劲, 与常态一阳指的月白区分开)
+  yiyangc:    {name:'一阳指·透骨', pow:3900, hit:78, crit:22, rng:[1,3], cost:25, will:0,   type:'内', anim:{kind:'beam',   color:'#ff9a5a'}},
 };
 
 // 运功: {名,耗真气,效果键,说明}
@@ -126,6 +128,22 @@ const STORY = {
     { sp:'duanyu',                text:'诸位小心。东北雪地里那个恶僧，铁杖劲力奇大，不可硬接。' },
     { sp:'xiaobao',               text:'喂喂喂，打架归打架！先说清楚，我韦小宝这条命，金贵得很！' },
     { sp:'hero',     name:'无名主角', text:'（这个世界没有辽，可城墙与飞雪都是真的。）先活下去——然后，找回我的名字。' },
+  ],
+};
+
+// ============ P3-12a BOSS 阶段机制(AUDIT#15: 纯磨血超3回合=失败, 半血必须变招) ============
+// 规则层入口在 engine.checkBossPhase(阈值判定/属性/武器/援军全在此配置); 演出层在 main.phaseFx
+// 设计标尺(苛刻老玩家): SRW BOSS 二阶段=情绪拐点 —— 台词点名+狂怒buff+压场援军, 逼玩家改变节奏
+const BOSS_PHASES = {
+  duanyq: [
+    { at: 0.5,                       // HP 比例跌破此值触发(每阶段一次, 按数组顺序)
+      tag: '狂 怒',
+      quote: '……能把我段延庆逼到这一步。就让你们见识，大理段氏真正的看家本领！',
+      buffs: { atk: 30, def: 20 },   // 半血狂怒: 膂力/根骨永久提升
+      will: 130,                     // 气势拉满(气势增伤即时生效, 决战压迫感)
+      addWeapons: ['yiyangc'],       // 解锁阶段大招·一阳指·透骨
+      spawn: [ { tpl: 'liaobing', x: 11, y: 4 }, { tpl: 'liaobing', x: 12, y: 5 } ], // 辽兵援军压场
+    },
   ],
 };
 

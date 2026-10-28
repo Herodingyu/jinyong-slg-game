@@ -29,7 +29,11 @@ function saveSwitch(key, val) {
 }
 let fxOn = loadSwitch('fx', true);
 const FX = { portrait: null, bigText: '', bigCrit: false,
-             cutinT0: 0, cutinUntil: 0, flashT0: 0, flashUntil: 0, shakeUntil: 0,
+             cutinT0: 0, cutinUntil: 0, cutinRight: false, // P3-12a: true=立绘从右侧入画(BOSS压迫感, 与运功左侧cutin区分)
+             flashT0: 0, flashUntil: 0,
+             redT0: 0, redUntil: 0,      // P3-12a: BOSS 阶段赤红压屏闪
+             phaseQuote: null,           // P3-12a: 阶段台词 {text,t0,until}(底部台词条)
+             shakeUntil: 0,
              miniOn: false,   // 攻击事件期间战场缩略图置底模式
              hpAnim: null,    // HP逐格递减 {u,from,to,t0,per,crit}
              ringFx: null,    // P1-6: 运功角色色环 {x,y,color,t0,until}
@@ -1042,7 +1046,18 @@ function draw() {
       ctx.fillStyle = 'rgba(255,255,255,' + Math.max(0, a).toFixed(3) + ')';
       ctx.fillRect(0, 0, cv.width, cv.height);
     }
-    // P0-1/P1-6: 立绘切入+书法大字; 无立绘角色大字居中(台词/运功通用)
+    // P3-12a: BOSS 阶段赤红压屏闪(与受击白闪分层, 情绪拐点必须看得见)
+    if (now < FX.redUntil) {
+      const a = 0.5 * (1 - (now - FX.redT0) / (FX.redUntil - FX.redT0));
+      const rg = ctx.createRadialGradient(cv.width / 2, cv.height / 2, 60,
+        cv.width / 2, cv.height / 2, cv.width * 0.7);
+      rg.addColorStop(0, 'rgba(200,30,20,0)');
+      rg.addColorStop(1, 'rgba(200,30,20,' + Math.max(0, a).toFixed(3) + ')');
+      ctx.fillStyle = rg;
+      ctx.fillRect(0, 0, cv.width, cv.height);
+    }
+    // P0-1/P1-6/P3-12a: 立绘切入+书法大字; 无立绘角色大字居中(台词/运功通用)
+    // cutinRight: BOSS 从右侧入画(面对玩家), 文字居左——与运功cutin(左入画)镜像
     if (now < FX.cutinUntil && FX.bigText) {
       const im = FX.portrait;
       const hasIm = im && im.complete;
@@ -1050,10 +1065,20 @@ function draw() {
       if (hasIm) {
         const ph = cv.height * 0.78, pw = ph * im.width / im.height;
         const slide = Math.min(1, (now - FX.cutinT0) / 220); // 220ms滑入
-        const px = -pw + (14 + pw) * slide;
-        ctx.drawImage(im, px, cv.height - ph - 8, pw, ph);
-        tx = Math.max(px + pw - 40, cv.width * 0.38);
-        ctx.textAlign = 'left';
+        if (FX.cutinRight) {
+          const px = cv.width + pw - (14 + pw) * slide - pw;  // 右侧贴边入画
+          // 镜像面向左=面向玩家: T(px+pw,0)·S(-1,1) 后, 镜像空间内画 [0,pw] 正好落在 [px,px+pw]
+          ctx.save(); ctx.translate(px + pw, 0); ctx.scale(-1, 1);
+          ctx.drawImage(im, 0, cv.height - ph - 8, pw, ph);
+          ctx.restore();
+          tx = Math.min(px - 30, cv.width * 0.52);
+          ctx.textAlign = 'right';
+        } else {
+          const px = -pw + (14 + pw) * slide;
+          ctx.drawImage(im, px, cv.height - ph - 8, pw, ph);
+          tx = Math.max(px + pw - 40, cv.width * 0.38);
+          ctx.textAlign = 'left';
+        }
       } else {
         tx = cv.width * 0.5; // 无立绘: 大字居中
         ctx.textAlign = 'center';
@@ -1116,6 +1141,24 @@ function draw() {
   if (TITLE.active) drawTitleCard(now);
   if (DLG.active) drawDialogBox(now);
   if (SORTIE.active) drawSortie(now);
+  // P3-12a: BOSS 阶段台词台词条(底部黑条金字, 与对白框同风格但轻量, 不与剧情演出共存)
+  if (FX.phaseQuote && now < FX.phaseQuote.until) {
+    const q = FX.phaseQuote, qa = Math.min(1, (now - q.t0) / 220);
+    const qy = cv.height - 96;
+    ctx.save();
+    ctx.globalAlpha = qa * 0.92;
+    ctx.fillStyle = '#0a0812';
+    ctx.fillRect(cv.width * 0.08, qy - 26, cv.width * 0.84, 52);
+    ctx.strokeStyle = '#8a2a20'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(cv.width * 0.08, qy - 26, cv.width * 0.84, 52);
+    ctx.globalAlpha = qa;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '22px "KaiTi","STKaiti","Microsoft YaHei",serif';
+    ctx.fillStyle = '#f0d8b0';
+    ctx.fillText(q.text, cv.width / 2, qy);
+    ctx.restore();
+    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
+  }
   // P3-11b: 评价结算画面(最顶层; 点击重开)
   if (RESULT.active) drawResult(now);
   requestAnimationFrame(draw);
@@ -1153,8 +1196,8 @@ function drawResult(now) {
   ctx.strokeStyle = '#8a7430'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(CW * 0.20, 214); ctx.lineTo(CW * 0.80, 214); ctx.stroke();
 
-  // 三项战绩逐行入场(击破/说得/回合)
-  const foesTotal = INITIAL_UNITS.filter(e => CHAR_DATA[e.tpl || e.key].side === 'enemy').length;
+  // 三项战绩逐行入场(击破/说得/回合); P3-12a: foes 含阶段召唤援军(由 engine 在召唤时累加)
+  const foesTotal = G.stats.foes || INITIAL_UNITS.filter(e => CHAR_DATA[e.tpl || e.key].side === 'enemy').length;
   const rows = [
     ['击破敌军', `${G.stats.kills} / ${foesTotal}`],
     ['说得', `${G.stats.speaks} / 1`],
@@ -2193,6 +2236,11 @@ async function animateEvent(ev, skipMotif) {
       (ev.killed ? `，<span style="color:#ff9070">击破！</span>` : ''));
   if (ev.killed) { if (!fxOn) banner(ev.def.cn + ' 击破！', 800); playMotif(ev.att); } // P1-5: 演出开时击破峰值在FIGHT内(定格+台词), 不再重复banner
   checkEnd();
+  // P3-12a: BOSS 阶段判定 —— 未被击破的 BOSS 被打穿阈值时触发(规则+演出, AUDIT#15)
+  if (!G.over && ev.def.boss && ev.def.hp > 0) {
+    const ph = checkBossPhase(ev.def);
+    if (ph) await phaseFx(ev.def, ph);
+  }
 }
 
 // 伤害飘字: B1起改由draw()统一渲染(旧setInterval直画在缩略图模式下会错位)
@@ -2206,6 +2254,39 @@ const SPIRIT_COLOR = { mustHit:'#6cf0ff', dmg2:'#ff6050', evade:'#8fd08f',
 function seSpirit() { beep(392, .1, 'sine', .06); setTimeout(() => beep(523, .12, 'sine', .06), 90); setTimeout(() => beep(659, .16, 'sine', .05), 180); }
 // P3-11a: 出击号角(简易上行三音, 出战前的仪式感)
 function seSortie() { beep(262, .14, 'square', .07); setTimeout(() => beep(392, .14, 'square', .07), 130); setTimeout(() => beep(523, .3, 'square', .08), 260); }
+// P3-12a: BOSS 阶段怒吼(低锯齿双音下坠, 压迫感)
+function seBossPhase() { beep(86, .5, 'sawtooth', .13); setTimeout(() => beep(58, .75, 'sawtooth', .11), 120); setTimeout(() => beep(120, .22, 'square', .07), 420); }
+// P3-12a: BOSS 阶段演出 —— 规则层已结算完(data.js BOSS_PHASES 驱动), 这里只负责让玩家看见:
+// 赤红压屏闪 + BOSS立绘右侧入画(面向玩家) + 「狂怒」金漆大字 + 底部台词条 + 怒吼 + 援军扬尘登场。
+// fxOff 时退化为横幅+日志(规则照样生效, 不锁玩家)。
+async function phaseFx(u, ph) {
+  const cfg = ph.phase;
+  banner(u.cn + ' · ' + cfg.tag.replace(/\s/g, ''), 1500);
+  log(`<span style="color:#ff7050">${u.cn}进入第二阶段【${cfg.tag.replace(/\s/g, '')}】！</span>`);
+  seBossPhase();
+  if (fxOn) {
+    const now = performance.now();
+    const pim = portraits[u.sprite];
+    FX.portrait = (pim && pim.complete && pim.naturalWidth > 0) ? pim : null;
+    FX.bigText = cfg.tag + '！';
+    FX.bigCrit = true;
+    FX.cutinRight = true;                    // BOSS 从右侧入画, 与运功 cutin 镜像
+    FX.cutinT0 = now; FX.cutinUntil = now + 1560;
+    FX.redT0 = now; FX.redUntil = now + 900; // 赤红压屏
+    FX.phaseQuote = { text: cfg.quote, t0: now + 240, until: now + 2360 };
+    await sleep(1700);
+  } else await sleep(500);
+  // 援军登场扬尘(规则层已生成单位, 这里给落点反馈)
+  const now2 = performance.now();
+  for (const s of ph.spawned) {
+    spawnDust(s.x * TS + TS / 2, s.y * TS + TS - 6, now2);
+    spawnDust(s.x * TS + TS / 2 - 14, s.y * TS + TS - 8, now2 + 40);
+    log(`<span style="color:#ff9070">辽兵援军出现在 (${s.x},${s.y})！</span>`);
+  }
+  if (ph.spawned.length) await sleep(360);
+  FX.cutinRight = false; FX.phaseQuote = null;
+}
+
 // 运功演出: buff名大字(立绘切入, 无立绘居中出字)+角色色光环+头顶小字
 async function spiritFx(u, s) {
   if (!fxOn) return;
@@ -2521,6 +2602,7 @@ document.getElementById('fxBtn').textContent = '演出:' + (fxOn ? '开' : '关'
 document.getElementById('bgmBtn').textContent = '音乐:' + (bgmOn ? '开' : '关');
 document.getElementById('counterBtn').textContent = '反击:' + (AUTO_COUNTER ? '自动' : '手动');
 G.units = INITIAL_UNITS.map(makeUnit);
+G.stats.foes = INITIAL_UNITS.filter(e => CHAR_DATA[e.tpl || e.key].side === 'enemy').length; // P3-12a: 初始敌总量(援军由 engine 累加)
 G.units.forEach(u => u.weapons.forEach(wid => { const w = WEAPONS[wid]; if (w.ammo !== undefined) u.ammo[w.name] = w.ammo; }));
 updateTop();
 log('雨夜破庙，半页残谱。辽兵在不该存在的襄阳城墙下肆虐……');

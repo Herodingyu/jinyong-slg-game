@@ -17,6 +17,7 @@ function makeUnit(entry) {
     motto: tpl.motto,
     ammo: {}, x: entry.x, y: entry.y,
     acted: false, movedTo: null,
+    phaseIdx: 0,   // P3-12a: BOSS 阶段进度(对照 data.js BOSS_PHASES[u.key])
     buffs: {}, // {mustHit, dmg2, evade, halfDmg, mov3, capture}
   };
 }
@@ -66,10 +67,12 @@ function attackTiles(u, w, fromX, fromY) {
 }
 
 // 战斗预测
+// P3-12b: 武器命中字段接入公式(此前 w.hit 是死数据) —— (w.hit-85)*0.6, 粗重兵器负修正(火枪/狼牙棒-6),
+// 精准拳脚正修正(长拳/空明+3); 单位身法仍是主项。mustHit 必中buff必须留在一切修正之后
 function forecast(att, def, w) {
   const tE = TERRAIN[terrainAt(def.x, def.y)];
   const tA = TERRAIN[terrainAt(att.x, att.y)];
-  let hitp = 90 + (att.hit - def.evd) * 0.4 - tE.eva * 0.5 + (tA.def ? 0 : 0);
+  let hitp = 90 + (att.hit - def.evd) * 0.4 + (w.hit - 85) * 0.6 - tE.eva * 0.5 + (tA.def ? 0 : 0);
   hitp = Math.max(5, Math.min(97, Math.round(hitp)));
   if (att.buffs.mustHit) hitp = 100; // 必中buff凌驾命中率上限(放在clamp后, 否则被压回97)
   let dmg = w.pow + att.atk * 4 - def.def * 3;
@@ -226,8 +229,52 @@ function comboTargets(u) {
   return list;
 }
 
+// P3-12a: BOSS 阶段判定 —— 守方 BOSS 被打穿阈值时调用(animateEvent 结算后)。
+// 规则层只做三件事: 属性buff/解锁武器/召唤援军(全按 data.js BOSS_PHASES 配置), 返回阶段对象供演出层消费;
+// 援军落点被占时按环形扫描挪到最近可站格。每阶段只触发一次(u.phaseIdx 推进)。
+function findSpawnTile(x0, y0) {
+  const free = (x, y) => x >= 0 && y >= 0 && x < W && y < H &&
+    moveCost({ buffs: {} }, x, y) >= 0 &&
+    !G.units.some(v => v.hp > 0 && v.x === x && v.y === y);
+  if (free(x0, y0)) return [x0, y0];
+  for (let r = 1; r < 6; r++)
+    for (let dx = -r; dx <= r; dx++)
+      for (let dy = -r; dy <= r; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        if (free(x0 + dx, y0 + dy)) return [x0 + dx, y0 + dy];
+      }
+  return null;
+}
+function checkBossPhase(u) {
+  const cfg = BOSS_PHASES[u.key];
+  if (!cfg || u.hp <= 0) return null;
+  const idx = u.phaseIdx || 0;
+  if (idx >= cfg.length) return null;
+  const ph = cfg[idx];
+  if (u.hp / u.maxhp > ph.at) return null;   // 还没打到阈值
+  u.phaseIdx = idx + 1;
+  if (ph.buffs) for (const k in ph.buffs) u[k] += ph.buffs[k];
+  if (ph.will) u.will = Math.min(u.maxwill, ph.will);
+  if (ph.addWeapons)
+    for (const wid of ph.addWeapons)
+      if (u.weapons.indexOf(wid) < 0) u.weapons.push(wid);
+  const spawned = [];
+  if (ph.spawn) {
+    for (const s of ph.spawn) {
+      const tile = findSpawnTile(s.x, s.y);
+      if (!tile) continue;                    // 实在没位置就放弃这名援军(不让游戏崩)
+      const nu = makeUnit({ key: s.tpl + '_s' + (++UID), tpl: s.tpl, x: tile[0], y: tile[1] });
+      G.units.push(nu);
+      spawned.push(nu);
+    }
+    G.stats.foes += spawned.length;           // 结算画面的击破总数要算上援军
+  }
+  return { phase: ph, spawned };
+}
+
 const G = {
   units: [], turn: 1, phase: 'player', over: false, comboUsed: false, result: null,
   // P3-11b: 评价结算数据源(AUDIT#14)。击破数在 resolveAttack 结算, 说得数在 doSpeak 结算
-  stats: { kills: 0, speaks: 0 },
+  // P3-12a: foes=敌总量(初始+阶段援军), 结算画面「击破敌军 x/foes」用
+  stats: { kills: 0, speaks: 0, foes: 0 },
 };
