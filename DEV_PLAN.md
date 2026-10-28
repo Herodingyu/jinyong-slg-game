@@ -206,3 +206,4 @@ cd app && node --check js/data.js && node --check js/engine.js && node --check j
 
 **完成记录**
 - 2026-10-19：F 阶段机制建立。首日修复 P0×3——miss/闪避进 FIGHT 场景（侧闪残影+「闪避」蓝白大字，守方不扣血无爆闪）；反击自动化（期望命中×伤害最优决策，顶栏「反击:自动/手动」可切；修复手动模式点「取消」Promise 永不 resolve 的流程卡死 bug）；FE 式悬停地形情报（地形名/移动力/防御/回避，右侧面板即时切换）。证据 /tmp/p0_miss_dodge.jpg、/tmp/p0_enemy.jpg。commit 021ea14。验证：node --check ×3 全过；悬停/演出/敌方回合自动化实测通过。
+- 2026-10-29 F-Day12：P3-12a BOSS 阶段机制落地（data.js BOSS_PHASES 配置驱动，engine.checkBossPhase 规则层[buff/解锁武器/环形扫描召唤援军/foes累加]，main.phaseFx 演出层[赤红压屏/右入画立绘/大字/台词条/怒吼/援军扬尘]，恰50%边界触发探针锁定，防重入）；P3-12b 强招复核执行（六脉35→45对齐降龙池深比；武器命中死字段接入 forecast）；AUDIT 记账 #36已修/#37封顶过快/#38敌方真气不回。
