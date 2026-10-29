@@ -27,6 +27,60 @@ function saveSwitch(key, val) {
   if (!_store) return;
   try { _store.setItem('jy_' + key, val ? '1' : '0'); } catch (e) {}
 }
+
+// ============ P3-12 D1: 存档/读档(表现层) ============
+// 规则层快照走 engine.serialize/deserialize(纯逻辑可单测); 这里只管 localStorage 与表现层收尾。
+// 存档时机: 玩家手动 + 开场/每回合开始自动存档 —— 败北后读档直接回到回合检查点(AUDIT#12)。
+const SAVE_KEY = 'jy_save';
+function syncSwitchBtns() { // 开关文案同步(读档应用了存档里的开关后需要)
+  document.getElementById('fxBtn').textContent = '演出:' + (fxOn ? '开' : '关');
+  document.getElementById('bgmBtn').textContent = '音乐:' + (bgmOn ? '开' : '关');
+  document.getElementById('counterBtn').textContent = '反击:' + (AUTO_COUNTER ? '自动' : '手动');
+}
+function saveGame(silent) {
+  if (!_store) return false; // node 测试台无 localStorage, 静默降级
+  try {
+    _store.setItem(SAVE_KEY, JSON.stringify({
+      v: 1, savedAt: Date.now(),
+      switches: { fx: fxOn, bgm: bgmOn, counter: AUTO_COUNTER }, // 演出开关随档走
+      state: serialize(),
+    }));
+    if (!silent) { log('进度已存档'); banner('进度已保存', 900); }
+    return true;
+  } catch (e) { if (!silent) log('存档失败: ' + e.message); return false; }
+}
+function loadGame() {
+  if (!_store) return false;
+  const raw = _store.getItem(SAVE_KEY);
+  if (!raw) { log('没有找到存档'); return false; }
+  try {
+    const payload = JSON.parse(raw);
+    // 表现层 transient 状态全收尾, 避免读档后残留旧演出/选中/移动动画
+    endFight(); INTRO.active = false; TITLE.active = false; DLG.active = false;
+    SORTIE.active = false; RESULT.active = false; MAP_MOVE = null;
+    FX.dust = []; FX.floats = []; FX.hpAnim = null; FX.ringFx = null; FX.phaseQuote = null;
+    FX.bigText = null; FX.portrait = null; FX.cutinRight = false;
+    Sel.unit = null; Sel.moveTiles = null; Sel.atkTiles = null; Sel.pending = null;
+    hideMenus(); showInfo(null);
+    for (const k in FACE) delete FACE[k];
+    deserialize(payload.state);
+    if (payload.switches) {
+      fxOn = !!payload.switches.fx; bgmOn = !!payload.switches.bgm;
+      AUTO_COUNTER = payload.switches.counter !== false;
+      if (!bgmOn) beepStop();
+      syncSwitchBtns();
+    }
+    updateTop();
+    log(`读档完成：第 ${G.turn} 回合`);
+    banner('已读取存档', 900);
+    return true;
+  } catch (e) { log('读档失败: ' + e.message); return false; }
+}
+// 存档/读档准入: 只在"玩家回合且无演出进行"时空闲(战斗/移动/剧情/结算中操作会截断状态机)
+function saveLoadIdle() {
+  return G.phase === 'player' && !G.over && !FIGHT.active && !MAP_MOVE &&
+    !INTRO.active && !TITLE.active && !DLG.active && !SORTIE.active && !RESULT.active;
+}
 let fxOn = loadSwitch('fx', true);
 const FX = { portrait: null, bigText: '', bigCrit: false,
              cutinT0: 0, cutinUntil: 0, cutinRight: false, // P3-12a: true=立绘从右侧入画(BOSS压迫感, 与运功左侧cutin区分)
@@ -48,6 +102,10 @@ const UAN = { breatheA: 0.022, breatheT: 1100,   // 待机呼吸: squash幅度/�
               tileMs: 130, dustLife: 430 };      // 每格移动耗时/扬尘寿命
 const FACE = {};                // u.id → 1(朝右)/-1(朝左); 缺省我方朝右/敌方朝左
 let MAP_MOVE = null;            // 地图移动动画 {u,x0,y0,x1,y1,t0,dur,lastStep}
+// P3-12 D2: 升级演出状态(金漆大字+成长明细+脚下光环); 数值早已在规则层落账, 这里只管玩家看见
+const LVUP = { active: false, t0: 0, until: 0, u: null, lv0: 0, gains: null };
+const LVUP_GAINS_CN = { hp: '体力', sp: '真气', atk: '膂力', def: '根骨', hit: '命中', evd: '闪避' };
+function fmtGains(gains) { return Object.keys(gains).map(k => `${LVUP_GAINS_CN[k]}+${gains[k]}`).join(' '); }
 
 // ============ B2: 机战式横版战斗场景 ============
 // 攻击确认后切入: 战场压暗为背景+电影黑边, 攻方立绘左/守方立绘右(守方镜像),
@@ -1160,6 +1218,8 @@ function draw() {
     ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
   }
   // P3-11b: 评价结算画面(最顶层; 点击重开)
+  // P3-12 D2: 升级大字画在结算屏之下(结算优先, 击破BOSS同帧升级时不糊结算画面)
+  if (LVUP.active) drawLvUp(now);
   if (RESULT.active) drawResult(now);
   requestAnimationFrame(draw);
 }
@@ -2036,6 +2096,7 @@ function showInfo(u) {
     `border:2px solid ${border};image-rendering:${hasP ? 'auto' : 'pixelated'}">` +
     `<div style="flex:1;min-width:0"><b>${u.cn}</b>${u.boss ? ' <span style="color:#ff7050">·BOSS</span>' : ''}<br>` +
     `HP ${u.hp}/${u.maxhp} ｜ 真气 ${u.sp}/${u.maxsp} ｜ 气势 <b style="color:#e8c85a">${u.will}</b><br>` +
+    `Lv.${u.lv || 1} ｜ 经验 ${u.exp || 0}/${EXP_CFG.need}<br>` + // P3-12 D2: 成长可见(AUDIT#12⑤)
     `膂力${u.atk} 根骨${u.def} 命中${u.hit} 闪避${u.evd} 轻功${u.mov}<br>` +
     `武功: ${wp}</div></div>`;
 }
@@ -2241,6 +2302,8 @@ async function animateEvent(ev, skipMotif) {
     const ph = checkBossPhase(ev.def);
     if (ph) await phaseFx(ev.def, ph);
   }
+  // P3-12 D2: 升级演出(击破/命中的经验已在规则层落账, 这里让玩家看见成长)
+  if (ev.levelUps) await lvUpFx(ev.att, ev.levelUps);
 }
 
 // 伤害飘字: B1起改由draw()统一渲染(旧setInterval直画在缩略图模式下会错位)
@@ -2285,6 +2348,52 @@ async function phaseFx(u, ph) {
   }
   if (ph.spawned.length) await sleep(360);
   FX.cutinRight = false; FX.phaseQuote = null;
+}
+
+// P3-12 D2: 升级演出 —— 金漆「升级！」大字 + 等级跃迁 + 成长明细 + 单位脚下金色光环。
+// 多连升聚合一段(Lv.5 → 7, 成长累加)。fxOff 退化为日志(数值早已落账, 不锁玩家)。
+async function lvUpFx(u, ups) {
+  const lv0 = u.lv - ups.length;
+  const gains = {};
+  for (const up of ups) for (const k in up.gains) gains[k] = (gains[k] || 0) + up.gains[k];
+  log(`<span style="color:#ffd24a">✦ ${u.cn} 升到 Lv.${u.lv}！${fmtGains(gains)}</span>`);
+  if (!fxOn) return;
+  const now = performance.now();
+  LVUP.active = true; LVUP.t0 = now; LVUP.until = now + 1900;
+  LVUP.u = u; LVUP.lv0 = lv0; LVUP.gains = gains;
+  seSortie(); // 上行三音充当升级号
+  await sleep(1950);
+  LVUP.active = false;
+}
+// 升级大字: 金漆渐显+入场微弹跳, 成长明细行, 单位脚下呼吸光环(属性微光)
+function drawLvUp(now) {
+  const u = LVUP.u;
+  const k = Math.min(1, (now - LVUP.t0) / 220);
+  const pop = 1 + 0.18 * Math.sin(Math.min(1, (now - LVUP.t0) / 300) * Math.PI);
+  const fade = now > LVUP.until - 300 ? Math.max(0, (LVUP.until - now) / 300) : 1;
+  ctx.save();
+  ctx.globalAlpha = k * fade;
+  if (u) { // 脚下金色光环(呼吸)
+    const cx = u.x * TS + TS / 2, cy = u.y * TS + TS - 6;
+    const pr = 0.5 + 0.5 * Math.sin(now / 130);
+    ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 3;
+    ctx.globalAlpha = 0.55 * k * fade;
+    ctx.beginPath(); ctx.ellipse(cx, cy, 20 + 6 * pr, 8 + 3 * pr, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = k * fade;
+  }
+  ctx.textAlign = 'center';
+  ctx.font = `bold ${Math.round(64 * pop)}px "Kaiti SC","STKaiti",serif`;
+  ctx.fillStyle = '#3a2a10';
+  ctx.fillText('升 级 ！', W * TS / 2 + 3, 133);
+  ctx.fillStyle = '#ffd24a';
+  ctx.fillText('升 级 ！', W * TS / 2, 130);
+  ctx.font = 'bold 24px monospace';
+  ctx.fillStyle = '#fff8e0';
+  ctx.fillText(`${u.cn}  Lv.${LVUP.lv0} → ${u.lv}`, W * TS / 2, 168);
+  ctx.font = '18px monospace';
+  ctx.fillStyle = '#ffe9a0';
+  ctx.fillText(fmtGains(LVUP.gains), W * TS / 2, 196);
+  ctx.restore();
 }
 
 // 运功演出: buff名大字(立绘切入, 无立绘居中出字)+角色色光环+头顶小字
@@ -2386,6 +2495,9 @@ async function enemyPhase() {
   }
   for (const u of G.units.filter(v => v.side === 'enemy' && v.hp > 0)) clearBuffs(u);
   updateTop();
+  // P3-12 D1: 每回合开始自动存档 —— 败北后刷新+读档直接回到回合检查点
+  saveGame(true);
+  log('<span class="dim">回合开始，已自动存档</span>');
   banner('第 ' + G.turn + ' 回合 · 我方行动', 900);
 }
 
@@ -2529,7 +2641,16 @@ document.getElementById('counterBtn').onclick = e => {
   e.target.textContent = '反击:' + (AUTO_COUNTER ? '自动' : '手动');
 };
 document.getElementById('helpBtn').onclick = () => {
-  alert('操作:\n点击我方单位 -> 点蓝格移动 -> 在菜单选指令\n攻击: 选武功(看命中/伤害预测) -> 点黄圈内的敌人\n运功: 耗真气发动(凝神必中/热血×2/游身闪避...)\n韦小宝邻接残血辽将 -> 说得收服\n萧峰郭靖相邻且气势≥120 -> 合体技「双侠镇襄阳」\n敌方回合可反击(选武功或硬吃攒气势)\n胜利条件: 击破段延庆');
+  alert('操作:\n点击我方单位 -> 点蓝格移动 -> 在菜单选指令\n攻击: 选武功(看命中/伤害预测) -> 点黄圈内的敌人\n运功: 耗真气发动(凝神必中/热血×2/游身闪避...)\n韦小宝邻接残血辽将 -> 说得收服\n萧峰郭靖相邻且气势≥120 -> 合体技「双侠镇襄阳」\n敌方回合可反击(选武功或硬吃攒气势)\n存档: 我方回合空闲随时可存; 开场/每回合开始自动存档\n败北后刷新页面, 点「读档」回到回合检查点\n胜利条件: 击破段延庆');
+};
+// P3-12 D1: 存档/读档按钮(准入见 saveLoadIdle)
+document.getElementById('saveBtn').onclick = () => {
+  if (!saveLoadIdle()) { log('战斗或演出进行中，不能存档'); return; }
+  saveGame(false);
+};
+document.getElementById('loadBtn').onclick = () => {
+  if (!saveLoadIdle()) { log('战斗或演出进行中，不能读档'); return; }
+  loadGame();
 };
 // 空格/回车也可推进剧情(与点击同权; 测试台 window 无 addEventListener, 防御式注册)
 if (typeof window !== 'undefined' && window.addEventListener) {
@@ -2577,6 +2698,8 @@ async function playStory() {
 function beginPlay() {
   INTRO.active = false; // 对白比扫场长时, 开战即收镜头
   banner('第 1 回合 · 我方行动', 1200);
+  // P3-12 D1: 开场即自动存档(全新一周目的第一个检查点)
+  saveGame(true);
 }
 
 // 等一个输入脉冲(点击/空格)或超时自动收场(标题卡/出击用)
@@ -2598,9 +2721,7 @@ async function playLine() {
 
 // ---------- 初始化 ----------
 // P3-11: 恢复上次开关状态后同步按钮文案(刷新后不再全部回到默认开)
-document.getElementById('fxBtn').textContent = '演出:' + (fxOn ? '开' : '关');
-document.getElementById('bgmBtn').textContent = '音乐:' + (bgmOn ? '开' : '关');
-document.getElementById('counterBtn').textContent = '反击:' + (AUTO_COUNTER ? '自动' : '手动');
+syncSwitchBtns();
 G.units = INITIAL_UNITS.map(makeUnit);
 G.stats.foes = INITIAL_UNITS.filter(e => CHAR_DATA[e.tpl || e.key].side === 'enemy').length; // P3-12a: 初始敌总量(援军由 engine 累加)
 G.units.forEach(u => u.weapons.forEach(wid => { const w = WEAPONS[wid]; if (w.ammo !== undefined) u.ammo[w.name] = w.ammo; }));

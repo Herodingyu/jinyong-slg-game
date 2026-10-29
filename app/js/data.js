@@ -47,40 +47,59 @@ const SPIRIT_BOOK = {
   shenxing:{name:'神行',  cost:15, fx:'mov3',     desc:'移动力+3'},
 };
 
+// ============ P3-12(D2) 经验与升级(AUDIT#12: 一周目要成立, 成长必须可见) ============
+// 规则全在 engine.gainExp: 满 need 升级(溢出结转), 升级按 growth 概率roll中才加点(可注入RNG测试)
+// 命中即有参与感经验, 击破大头=敌方等级×10(模板 lv); 体力成长同步回血(机战式升级修理感)
+const EXP_CFG = {
+  need: 100,        // 升级所需经验
+  hit: 2,           // 命中即得(出手就有成长反馈)
+  killPerLv: 10,    // 击破 = 敌方模板等级 × 10
+  steps: { hp: 150, sp: 6, atk: 6, def: 5, hit: 4, evd: 4 }, // 升级单步增量(数值只进 data.js)
+};
+
 // 角色模板: atk膂力 def根骨 hit身法(命中) evd身法(闪避) mov轻功
+// lv=模板等级(击破经验数据源); growth=五项成长率(0~1, 升级时按率随机加点)
 const CHAR_DATA = {
-  xiaofeng:  {cn:'萧峰',   sprite:'xiaofeng',  side:'player',
+  xiaofeng:  {cn:'萧峰',   sprite:'xiaofeng',  side:'player', lv:6,
+              growth:{hp:.85, sp:.35, atk:.60, def:.55, hit:.35, evd:.30},
               hp:5200, sp:150, mov:5, atk:220, def:170, hit:150, evd:130,
               weapons:['changquan','dagou','xianglong'],
               spirits:['ning','rexue'],
               motto:'我乔峰要走，谁能拦我！'},
-  guojing:   {cn:'郭靖',   sprite:'guojing',   side:'player',
+  guojing:   {cn:'郭靖',   sprite:'guojing',   side:'player', lv:5,
+              growth:{hp:.90, sp:.40, atk:.50, def:.70, hit:.30, evd:.25},
               hp:5600, sp:120, mov:4, atk:180, def:210, hit:130, evd:100,
               weapons:['changquan','kongming','xianglong'],
               spirits:['jinzhong','shizi'],
               motto:'侠之大者，为国为民！'},
-  duanyu:    {cn:'段誉',   sprite:'duanyu',    side:'player',
+  duanyu:    {cn:'段誉',   sprite:'duanyu',    side:'player', lv:4,
+              growth:{hp:.70, sp:.55, atk:.45, def:.30, hit:.45, evd:.60},
               hp:3600, sp:200, mov:5, atk:170, def:110, hit:160, evd:180,
               weapons:['changquan','liumai'],
               spirits:['youshen','ning'],
               motto:'神仙姐姐保佑……咦，打中了？'},
-  xiaobao:   {cn:'韦小宝', sprite:'xiaobao',   side:'player',
+  xiaobao:   {cn:'韦小宝', sprite:'xiaobao',   side:'player', lv:2,
+              growth:{hp:.65, sp:.40, atk:.35, def:.35, hit:.40, evd:.55},
               hp:2400, sp:100, mov:4, atk:90,  def:90,  hit:140, evd:160,
               weapons:['bishou','huoqiang'],
               spirits:['qinna','shenxing'],
               motto:'有话好说，有话好说！'},
-  hero:      {cn:'无名主角',sprite:'hero',      side:'player',
+  hero:      {cn:'无名主角',sprite:'hero',      side:'player', lv:1,
+              growth:{hp:.80, sp:.45, atk:.55, def:.50, hit:.45, evd:.45},
               hp:3000, sp:120, mov:5, atk:140, def:130, hit:140, evd:140,
               weapons:['changquan','canpu'],
               spirits:['rexue','youshen'],
               motto:'我的名字……在哪里？'},
-  liaobing:  {cn:'辽兵',   sprite:'liaobing',  side:'enemy',
+  liaobing:  {cn:'辽兵',   sprite:'liaobing',  side:'enemy', lv:1,
+              growth:{hp:.55, sp:.25, atk:.35, def:.30, hit:.25, evd:.25},
               hp:2200, sp:40, mov:4, atk:120, def:100, hit:100, evd:90,
               weapons:['wandao'], spirits:['jinzhong'], motto:'杀！'},
-  liaojiang: {cn:'辽将',   sprite:'liaojiang', side:'enemy', speakable:true,
+  liaojiang: {cn:'辽将',   sprite:'liaojiang', side:'enemy', lv:3, speakable:true,
+              growth:{hp:.70, sp:.35, atk:.50, def:.45, hit:.35, evd:.30},
               hp:3400, sp:60, mov:4, atk:160, def:140, hit:120, evd:110,
               weapons:['wandao','langyabang'], spirits:['ning','jinzhong'], motto:'中原无英雄！'},
-  duanyq:    {cn:'段延庆', sprite:'duanyq',    side:'enemy', boss:true,
+  duanyq:    {cn:'段延庆', sprite:'duanyq',    side:'enemy', boss:true, lv:6,
+              growth:{hp:.80, sp:.45, atk:.55, def:.50, hit:.40, evd:.35},
               hp:6800, sp:100, mov:4, atk:230, def:180, hit:150, evd:120,
               weapons:['tiezhang','yiyang'], spirits:['rexue','ning','jinzhong'], motto:'大理段氏，今日血债血偿。'},
 };

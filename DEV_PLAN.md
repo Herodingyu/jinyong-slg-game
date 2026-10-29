@@ -136,17 +136,19 @@ cd app && node --check js/data.js && node --check js/engine.js && node --check j
 **目标**：localStorage 存档/读档、经验/升级、道具系统、胜负结算——让玩家"这一周目"成立。
 **涉及文件**：`app/js/engine.js`（经验/升级/道具结算规则）、`app/js/data.js`（经验表/道具表/成长率）、`app/js/main.js`（存档 UI/结算画面）。
 
-### 会话 D1：存档/读档
+### 会话 D1：存档/读档 ✅ 2026-10-30 交付（序章-scope）
 - `saveGame()`/`loadGame()`：序列化 G（单位 hp/sp/will/buffs/位置、回合、CHAPTERS 当前话、三线进度、碎片数、演出/音乐开关）→ localStorage `jy_save`；顶栏"存档/读档"按钮。
 - engine.js 提供 `serialize()/deserialize(obj)` 纯函数（方便无头测试）。
 - 验收：第 3 话中途存档→刷新→读档→局面完全一致。
 - 验证：无头断言 serialize→deserialize 往返一致。
+- **交付注记**：序列化字段=单位全量+回合/阶段/合体/统计+UID（多话时代的 CHAPTERS/三线/碎片字段预留在存档格式 v1 的 state 之上扩展；data.js 已加 `CHAPTER_ID='ch1-prologue'` 锚点）；存档时机=开场+每回合开始自动档+玩家手动档；读档恢复演出开关并清全部 transient；准入=玩家回合且无战斗/移动/剧情/结算进行中。败北后刷新+读档可回回合检查点（体面败北画面归 D4）。
 
-### 会话 D2：经验与升级
+### 会话 D2：经验与升级 ✅ 2026-10-30 交付
 - engine.js：击破/命中获得经验（建议：击破=敌方等级×10，命中=2），`gainExp(u,n)`；data.js 每角色 `growth:{hp,sp,atk,def,hit,evd}` 成长率；升级按率随机加点（引擎内用可注入 RNG 以便测试）。
 - main.js：升级时大字"升级！"+全属性微光。
 - 验收：韦小宝说得收服的辽将也能正常吃经验升级。
 - 验证：引擎断言——经验满 100 升级、五项按成长率增长。
+- **交付注记**：数值全在 data.js `EXP_CFG`（门槛100/命中2/击破=敌方模板lv×10/单步hp+150·sp+6·atk+6·def+5·hit+4·evd+4）；体力成长同步回血；溢出结转连升聚合；升级摘要挂 `ev.levelUps` 交演出层（金漆大字+等级跃迁+成长明细+脚下金环，fxOff 退化日志）；面板显示 `Lv.x ｜ 经验 n/100`；说得收服单位随全员 lv/exp 字段天然可升级（验收达成）。敌方模板等级：辽兵lv1/辽将lv3/段延庆lv6。
 
 ### 会话 D3：道具系统
 - data.js `ITEMS`：金创药（回血）/九花玉露丸（回内）/石灰粉（小 MAP 命中下降）等，先做人畜无害的 3-4 件。

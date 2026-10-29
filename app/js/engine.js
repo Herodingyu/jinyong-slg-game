@@ -15,6 +15,7 @@ function makeUnit(entry) {
     atk: tpl.atk, def: tpl.def, hit: tpl.hit, evd: tpl.evd,
     mov: tpl.mov, weapons: tpl.weapons.slice(), spirits: tpl.spirits.slice(),
     motto: tpl.motto,
+    lv: tpl.lv || 1, exp: 0, growth: tpl.growth || null, // P3-12 D2: 等级/经验/成长率(模板 lv 是击破经验数据源)
     ammo: {}, x: entry.x, y: entry.y,
     acted: false, movedTo: null,
     phaseIdx: 0,   // P3-12a: BOSS 阶段进度(对照 data.js BOSS_PHASES[u.key])
@@ -111,10 +112,41 @@ function resolveAttack(att, def, w, opts) {
     }
     else { att.will = Math.min(att.maxwill, att.will + 1); def.will = Math.min(def.maxwill, def.will + 1); }
     if (w.ammo !== undefined) att.ammo[w.name] = (att.ammo[w.name] ?? w.ammo) - 1;
-    return { type: 'hit', att, def, w, dmg, isCrit, killed };
+    // P3-12 D2: 经验结算(规则层; 数值在 data.js EXP_CFG) —— 命中即有, 击破=敌方等级×10
+    let lvUps = gainExp(att, EXP_CFG.hit);
+    if (killed) lvUps = lvUps.concat(gainExp(att, (def.lv || 1) * EXP_CFG.killPerLv));
+    const ev = { type: 'hit', att, def, w, dmg, isCrit, killed };
+    if (lvUps.length) ev.levelUps = lvUps; // 升级摘要交给演出层消费
+    return ev;
   }
   att.will = Math.min(att.maxwill, att.will + 1);
   return { type: 'miss', att, def, w };
+}
+
+// P3-12 D2: 经验与升级 —— 满 EXP_CFG.need 升级(溢出结转), 按成长率随机加点。
+// rng 可注入(测试锁确定性): 传入 ()=>0 必全成长, ()=>0.99 必不成长。
+// 体力成长同步回血(机战式升级修理感)。返回升级摘要数组 [{lv,gains{hp:150,...}}] 供演出层。
+function gainExp(u, n, rng) {
+  rng = rng || Math.random;
+  u.exp = (u.exp || 0) + n;
+  const ups = [];
+  while (u.exp >= EXP_CFG.need) {
+    u.exp -= EXP_CFG.need;
+    u.lv = (u.lv || 1) + 1;
+    const gains = {};
+    for (const k in EXP_CFG.steps) {
+      const g = (u.growth && u.growth[k]) || 0;
+      if (g > 0 && rng() < g) {
+        const add = EXP_CFG.steps[k];
+        if (k === 'hp') { u.maxhp += add; u.hp = Math.min(u.maxhp, u.hp + add); }
+        else if (k === 'sp') { u.maxsp += add; }
+        else u[k] += add;
+        gains[k] = (gains[k] || 0) + add;
+      }
+    }
+    ups.push({ lv: u.lv, gains });
+  }
+  return ups;
 }
 
 // 可反击的武功列表
@@ -278,3 +310,41 @@ const G = {
   // P3-12a: foes=敌总量(初始+阶段援军), 结算画面「击破敌军 x/foes」用
   stats: { kills: 0, speaks: 0, foes: 0 },
 };
+
+// ============ P3-12 D1: 存档/读档(纯规则层序列化, 表现层只管 localStorage 读写) ============
+// 单位逐字段快照(全部 JSON 安全): 说得收服(side 改写)/升级成长/BOSS阶段进度/弹药/buff 全量保留。
+// UID 一并存档 —— 反序列化后召唤援军的自增 id 不与旧单位冲突。
+function serialize() {
+  const units = G.units.map(u => ({
+    id: u.id, key: u.key, cn: u.cn, sprite: u.sprite, side: u.side,
+    boss: !!u.boss, speakable: !!u.speakable,
+    maxhp: u.maxhp, hp: u.hp, maxsp: u.maxsp, sp: u.sp,
+    will: u.will, maxwill: u.maxwill,
+    atk: u.atk, def: u.def, hit: u.hit, evd: u.evd, mov: u.mov,
+    weapons: u.weapons.slice(), spirits: u.spirits.slice(), motto: u.motto,
+    lv: u.lv || 1, exp: u.exp || 0, growth: u.growth,
+    ammo: Object.assign({}, u.ammo), x: u.x, y: u.y,
+    acted: !!u.acted, movedTo: u.movedTo || null, phaseIdx: u.phaseIdx || 0,
+    buffs: Object.assign({}, u.buffs),
+  }));
+  return {
+    v: 1, UID,
+    turn: G.turn, phase: G.phase, over: !!G.over,
+    comboUsed: !!G.comboUsed, result: G.result,
+    stats: Object.assign({}, G.stats),
+    units,
+  };
+}
+// 反序列化: 深拷贝恢复(数组/对象全重建), 反复读档互不污染
+function deserialize(s) {
+  UID = s.UID || 0;
+  G.units = s.units.map(u => Object.assign({}, u, {
+    // 老存档兼容: 缺等级/经验字段时给默认值(老档单位零成长但不炸)
+    lv: u.lv || 1, exp: u.exp || 0, growth: u.growth,
+    weapons: u.weapons.slice(), spirits: u.spirits.slice(),
+    ammo: Object.assign({}, u.ammo), buffs: Object.assign({}, u.buffs),
+  }));
+  G.turn = s.turn; G.phase = s.phase; G.over = !!s.over;
+  G.comboUsed = !!s.comboUsed; G.result = s.result;
+  G.stats = Object.assign({}, s.stats);
+}

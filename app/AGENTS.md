@@ -41,3 +41,4 @@ cd app && python3 -m http.server 8000   # 打开 http://localhost:8000
 ## 每日改进（F阶段，2026-10-19 起）
 - [x] F-Day1 P0×3: miss进FIGHT(侧闪+闪避大字/不扣血) + 反击自动化(AUTO_COUNTER,修复modal卡死bug) + 悬停地形情报(TERRAIN读数,FE式)
 - [x] F-Day2 队首: P0-4 选中面板立绘头像 → P1-5 击破定格+motto → P1-6 运功演出（全部完成 2026-10-20，证据 /tmp/fday2/，详见 reports/improve-2026-10-20.md）
+- [x] F-Day13 队首: P3-12 D1 存档/读档（engine serialize/deserialize 纯函数+开场&回合开始自动档+顶栏手动档，读档清 transient） → P3-12 D2 经验与升级（EXP_CFG+八角色growth 入 data.js，gainExp 注入RNG/溢出结转/升级回血，LVFX 金漆大字+成长明细+金环，面板 Lv/经验行）（2026-10-30，证据 evidence/fday13_*，详见 reports/improve-2026-10-30.md）
