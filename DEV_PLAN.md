@@ -81,6 +81,11 @@ cd app && node --check js/data.js && node --check js/engine.js && node --check j
 - 验收：刷新后开关状态保持。
 - 验证：`node --check` + file:// 手测。
 
+### 会话 B5：三镜分镜与节奏重排（=IMPROVE P1-14）✅ 2026-10-31 交付
+- 丁工 2026-10-30 08:21 打回："跟机战PSP版相差太远，招式动作要不同、不能只是震屏"。诊断：出招 ~1s 单镜头无分镜，pose 一闪而过读不出。药方=加"时间"加"机位"。
+- 落地（main.js 纯表现层，engine/data 零改动）：FT 重排 `enter380→cut1 1560→strike 2320→cut2 2580→impact 2760→out 3640`，镜间 170ms 黑场；新增 `fightCam()` 三镜相机（镜1 推近 1.04→1.30 焦点攻方半身 / 镜2 拉回→1.02 焦点场景中心 / 镜3 守方 1.02→1.16 焦点受击位）；相机只包裹场景（shadows→伤害字），武器名标题/提示/血条为屏幕空间 HUD 不吃镜头；命中反馈全部从 strike 重锚 impact（白闪/震屏/扣血/killAt/守方登场/hitP）；攻方 charge/windup/aim 全部锚 `FT_READY=1240`（镜1 内蓄满定格 320ms）；删除 soloP 立绘自推近，独占感由镜1 特写表达；六脉指尖凝气光球 ≈1.9s（硬指标 ≥0.5s）且人物完整入画；会心 +120ms、合体 durOut +940ms（≥4.5s）、击破 durOut=killAt+1480。
+- 验证：`node --check ×3` 通过；`test_fx_b1` 17/17（血条 40ms/格断言兼容）；`regress_day6` 五幕全绿；capture_fday9 十案例 30 帧 + capture_fight 24 帧逐张亲看——10 招式三镜可辨（镜1 起手定格/镜2 拉远全景/镜3 命中同框）、会心"会心!"大字、miss"闪避"、击破白闪定格+"击破!"+胜利台词时序全部成立；新打磨两件记 AUDIT#41/#42（不阻塞）。
+
 ---
 
 ## 阶段 C：内容扩充（多话剧情 + 多方混战框架）

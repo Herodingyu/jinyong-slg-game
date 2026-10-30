@@ -1,28 +1,28 @@
-// P1-12 每招式差异化动作编排 · 改前/改后对比截帧工具
-// 全 9 种 anim kind 逐一合成确定性事件, 同时间戳截帧(蓄力峰/出招/命中峰), 输出 evidence/fday9_<mode>/
+// P1-14 演出分镜与节奏重排 · 三镜截帧工具(复用 P1-12 管线)
+// 全 10 种 anim kind 逐一合成确定性事件, 同时间戳截帧(镜1起手定格/镜2出招峰/镜3命中峰), 输出 evidence/fday14_<mode>/
 // 跑法: node tools/capture_fday9.js <before|after> [案例名...]
 const puppeteer = require('/usr/lib/node_modules/url-to-markdown-cli-tool/node_modules/puppeteer');
 const fs = require('fs');
 const path = require('path');
 const MODE = process.argv[2] || 'before';
 const ONLY = process.argv.slice(3);
-const DIR = path.join(__dirname, '..', '..', 'evidence', 'fday9_' + MODE);
+const DIR = path.join(__dirname, '..', '..', 'evidence', 'fday14_' + MODE);
 if (!fs.existsSync(DIR)) fs.mkdirSync(DIR, { recursive: true });
 if (!ONLY.length) fs.readdirSync(DIR).forEach(f => fs.unlinkSync(DIR + '/' + f));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// 帧位(相对 FIGHT.t0, tStrike=1030): 850=蓄力峰 1160=出招命中帧 1320=受击峰 1600=收势/退场
+// P1-14 帧位(相对 FIGHT.t0): 1250=镜1起手定格峰 2400=镜2出招峰 3000=镜3命中受击峰
 const CASES = [
-  ['dash',    'xiaofeng', 'liaobing', 'changquan', { type:'hit', dmg:980,  isCrit:false, killed:false }, [850, 1160, 1320]],
-  ['sweep',   'xiaofeng', 'liaobing', 'dagou',     { type:'hit', dmg:1100, isCrit:false, killed:false }, [850, 1160, 1320]],
-  ['dragon',  'xiaofeng', 'duanyq',   'xianglong', { type:'hit', dmg:2100, isCrit:false, killed:false }, [850, 1160, 1320]],
-  ['wave',    'guojing',  'liaobing', 'kongming',  { type:'hit', dmg:900,  isCrit:false, killed:false }, [850, 1160, 1320]],
-  ['beam6',   'duanyu',   'liaobing', 'liumai',    { type:'hit', dmg:1400, isCrit:false, killed:false }, [850, 1160, 1320]],
-  ['bullet',  'xiaobao',  'liaobing', 'huoqiang',  { type:'hit', dmg:1600, isCrit:false, killed:false }, [850, 1160, 1320]],
-  ['stab',    'xiaobao',  'liaobing', 'bishou',    { type:'hit', dmg:700,  isCrit:false, killed:false }, [850, 1160, 1320]],
-  ['smash',   'duanyq',   'guojing',  'tiezhang',  { type:'hit', dmg:1800, isCrit:false, killed:false }, [850, 1160, 1320]],
-  ['beam1',   'duanyq',   'guojing',  'yiyang',    { type:'hit', dmg:2200, isCrit:false, killed:false }, [850, 1160, 1320]],
-  ['slashx',  'hero',     'liaobing', 'canpu',     { type:'hit', dmg:1200, isCrit:false, killed:false }, [850, 1160, 1320]],
+  ['dash',    'xiaofeng', 'liaobing', 'changquan', { type:'hit', dmg:980,  isCrit:false, killed:false }, [1250, 2400, 3000]],
+  ['sweep',   'xiaofeng', 'liaobing', 'dagou',     { type:'hit', dmg:1100, isCrit:false, killed:false }, [1250, 2400, 3000]],
+  ['dragon',  'xiaofeng', 'duanyq',   'xianglong', { type:'hit', dmg:2100, isCrit:false, killed:false }, [1250, 2400, 3000]],
+  ['wave',    'guojing',  'liaobing', 'kongming',  { type:'hit', dmg:900,  isCrit:false, killed:false }, [1250, 2400, 3000]],
+  ['beam6',   'duanyu',   'liaobing', 'liumai',    { type:'hit', dmg:1400, isCrit:false, killed:false }, [1250, 2400, 3000]],
+  ['bullet',  'xiaobao',  'liaobing', 'huoqiang',  { type:'hit', dmg:1600, isCrit:false, killed:false }, [1250, 2400, 3000]],
+  ['stab',    'xiaobao',  'liaobing', 'bishou',    { type:'hit', dmg:700,  isCrit:false, killed:false }, [1250, 2400, 3000]],
+  ['smash',   'duanyq',   'guojing',  'tiezhang',  { type:'hit', dmg:1800, isCrit:false, killed:false }, [1250, 2400, 3000]],
+  ['beam1',   'duanyq',   'guojing',  'yiyang',    { type:'hit', dmg:2200, isCrit:false, killed:false }, [1250, 2400, 3000]],
+  ['slashx',  'hero',     'liaobing', 'canpu',     { type:'hit', dmg:1200, isCrit:false, killed:false }, [1250, 2400, 3000]],
 ];
 
 (async () => {

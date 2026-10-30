@@ -1,25 +1,27 @@
-// P1-9 立绘 puppet 动画 · 改前/改后对比截帧工具
+// P1-14 三镜节奏 · 命中/会心/落空/击破截帧工具(复用 P1-9 管线)
 // 驱动真实演出管线(animateEvent), 用确定性合成事件固定时间轴, 按 FIGHT 相对时刻截关键帧
 // 跑法: node tools/capture_fight.js <before|after> [案例名...]   (缺省全部, 每个案例独立起浏览器防内存膨胀)
 const puppeteer = require('/usr/lib/node_modules/url-to-markdown-cli-tool/node_modules/puppeteer');
 const fs = require('fs');
+const path = require('path');
 const MODE = process.argv[2] || 'before';
 const ONLY = process.argv.slice(3);
-const DIR = '/tmp/fday3_' + MODE;
+const DIR = path.join(__dirname, '..', '..', 'evidence', 'fday14_' + MODE + '_fight');
 if (!fs.existsSync(DIR)) fs.mkdirSync(DIR, { recursive: true });
 if (!ONLY.length) fs.readdirSync(DIR).forEach(f => fs.unlinkSync(DIR + '/' + f));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // 各案例: [名称, 攻方key, 守方key, 武器id, 事件补丁, 截帧偏移(ms, 相对FIGHT.t0)]
+// P1-14 时间轴: strike=2320 / impact=2760 / kill定格≈3160起。截帧: 入镜/镜1定格/镜2出招/镜3命中/收势
 const CASES = [
   ['hit',   'xiaofeng', 'liaobing', 'changquan', { type:'hit', dmg:980,  isCrit:false, killed:false },
-    [150, 800, 1000, 1100, 1180, 1260, 1900]],
+    [400, 1250, 2400, 3000, 3300, 3600]],
   ['crit',  'xiaofeng', 'duanyq',   'dagou',     { type:'hit', dmg:1560, isCrit:true,  killed:false },
-    [200, 850, 1150, 1300, 1550, 1950]],
+    [400, 1250, 2450, 3080, 3400, 3720]],
   ['miss',  'xiaofeng', 'liaobing', 'changquan', { type:'miss' },
-    [150, 800, 1080, 1250, 1500]],
+    [400, 1250, 2400, 3000, 3600]],
   ['kill',  'xiaofeng', 'liaobing', 'xianglong', { type:'hit', dmg:2600, isCrit:false, killed:true },
-    [150, 900, 1100, 1300, 1750, 2100, 2500, 3000]],
+    [400, 1250, 2400, 3000, 3360, 3960, 4400]],
 ];
 
 (async () => {

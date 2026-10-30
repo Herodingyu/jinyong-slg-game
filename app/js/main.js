@@ -110,7 +110,13 @@ function fmtGains(gains) { return Object.keys(gains).map(k => `${LVUP_GAINS_CN[k
 // ============ B2: 机战式横版战斗场景 ============
 // 攻击确认后切入: 战场压暗为背景+电影黑边, 攻方立绘左/守方立绘右(守方镜像),
 // 每把武功按 data.js 的 anim 配置演出独立动作(蓄力→出招→命中→收势), 全程程序动画零素材依赖。
-const FT = { enter: 360, charge: 700, strike: 1030, hit: 1500, out: 2080 }; // 时间轴(ms), 会心整体+240; P1-11: out 1740→2080, 守方退场+攻方独占收势要可读(旧淡出把退场吃了)
+// P1-14 三镜分镜时间轴(丁工 10-30 打回: 机战每武器 3~5s 三镜流, 旧版 ~1s 单镜读不出招式):
+//   入镜(0~enter) → 镜1 起手特写(enter~cut1, 相机推近攻方半身, 起手pose定格≥250ms)
+//   → 黑场切镜 cutMs → 镜2 攻击全景(cut1+cutMs~cut2, 拉回全景, strike 出招爆发)
+//   → 黑场切镜 → 镜3 命中特写(cut2+cutMs~out, 守方中景, impact 白闪/震屏/扣血)
+// 会心整体 +120ms; 合体技由 startFight 另加收势加长(必杀 4.5s+ 规格); 普通全镜 ~3.6s(规格 2.8~4s)
+const FT = { enter: 380, cut1: 1560, strike: 2320, cut2: 2580, impact: 2760, out: 3640, cutMs: 170 };
+const FT_READY = FT.cut1 - 320; // 起手定格起点: 起手 pose 在此前蓄满, 此后停住 ≥250ms(机战关键 pose 停得住, "像不像"的分水岭)
 const FIGHT = { active: false, ev: null, t0: 0, crit: false, isMiss: false, sparks: [],
                 attImg: null, defImg: null, attIsPortrait: false, defIsPortrait: false,
                 weaponName: '', animKind: 'dash', animColor: '#ffb84a', durOut: FT.out,
@@ -458,7 +464,7 @@ function easeOutBack(t) { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.
 // 设计原则(苛刻老玩家): 身体先于特效说话——直拳小快灵/横扫扭腰抡臂/降龙沉身推掌/
 // 空明云手慢摇/指法头部锁定瞄准/火枪后坐力/匕首弹射突刺/棒杖抡起俯砸/残谱正反双斩。
 function attBase(p, now, tStrike) {
-  const chargeP = win(p, FT.enter, tStrike);
+  const chargeP = win(p, FT.enter, FT_READY); // P1-14: 蓄力在镜1内蓄满(起手特写), FT_READY 后定格等切镜
   const snap = win(p, tStrike - 110, tStrike + 20) * (1 - easeOutBack(win(p, tStrike + 20, tStrike + 310)));
   return { chargeP, snap, breathe: Math.sin(now / 280) * 0.012 };
 }
@@ -481,7 +487,7 @@ function poseAttDash(p, now, tStrike) {
 // sweep 横扫(打狗棒/弯刀): 先扭身后抡扫——lean 由负扫到正, 腿随转体大摆
 function poseAttSweep(p, now, tStrike) {
   const { chargeP, breathe } = attBase(p, now, tStrike);
-  const windup = win(p, FT.enter + 60, tStrike - 150);
+  const windup = win(p, FT.enter + 60, FT_READY - 140); // P1-14: 扭身蓄势在镜1蓄满定格, 镜2挥出
   const sweepIn = win(p, tStrike - 150, tStrike + 30);
   const sweepOut = win(p, tStrike + 30, tStrike + 380);
   const thru = sweepIn * (1 - easeOutBack(sweepOut));
@@ -499,7 +505,7 @@ function poseAttSweep(p, now, tStrike) {
 // dragon 降龙十八掌·双掌前推: 全招式最深马步蓄力(squash 0.88), 全身前推送掌(最大前倾18°)
 function poseAttDragon(p, now, tStrike) {
   const { breathe } = attBase(p, now, tStrike);
-  const chargeP = win(p, FT.enter, tStrike - 60);        // 蓄力窗口更长(沉身更久)
+  const chargeP = win(p, FT.enter, FT_READY);            // P1-14: 沉身蓄力镜1内蓄满定格(旧窗口拉到 tStrike 全程太慢)
   const pushIn = win(p, tStrike - 130, tStrike + 30);
   const pushOut = win(p, tStrike + 30, tStrike + 430);
   const push = pushIn * (1 - easeOutBack(pushOut));
@@ -533,7 +539,7 @@ function poseAttWave(p, now, tStrike) {
 // beam 六脉/一阳指·凝指点射: 蓄力后仰凝神、头部几乎不动(瞄准感), 出招速点即回
 function poseAttBeam(p, now, tStrike) {
   const { chargeP, breathe } = attBase(p, now, tStrike);
-  const aim = win(p, FT.enter + 120, tStrike - 160) * (1 - win(p, tStrike - 100, tStrike + 10));
+  const aim = win(p, FT.enter + 120, FT_READY - 100) * (1 - win(p, tStrike - 100, tStrike + 10)); // P1-14: 凝指瞄准镜1定格(配指尖凝气光球), 出招速点即回
   const jabIn = win(p, tStrike - 90, tStrike + 15);
   const jabOut = win(p, tStrike + 15, tStrike + 280);
   const jab = jabIn * (1 - easeOutBack(jabOut));
@@ -550,7 +556,7 @@ function poseAttBeam(p, now, tStrike) {
 // bullet 火枪·瞄准射击: 贴腮瞄准(头后仰), 击发后整个人被后坐力震仰——老玩家一眼认出的枪感
 function poseAttBullet(p, now, tStrike) {
   const { breathe } = attBase(p, now, tStrike);
-  const aim = win(p, FT.enter + 100, tStrike - 120) * (1 - win(p, tStrike - 40, tStrike + 60));
+  const aim = win(p, FT.enter + 100, FT_READY - 120) * (1 - win(p, tStrike - 40, tStrike + 60)); // P1-14: 贴腮瞄准镜1定格
   const recoilIn = win(p, tStrike - 30, tStrike + 130);
   const recoilOut = win(p, tStrike + 130, tStrike + 540);
   const recoil = recoilIn * (1 - easeOutBack(recoilOut));
@@ -583,7 +589,7 @@ function poseAttStab(p, now, tStrike) {
 // smash 下砸(狼牙棒/铁杖): 深蹲抡起(上挺拉伸)→俯身砸落, 与整体跃起(attLeapY)叠加
 function poseAttSmash(p, now, tStrike) {
   const { chargeP, breathe } = attBase(p, now, tStrike);
-  const windup = win(p, FT.enter + 80, tStrike - 170);
+  const windup = win(p, FT.enter + 80, FT_READY - 120); // P1-14: 抡起上挺镜1定格
   const slamIn = win(p, tStrike - 170, tStrike + 40);
   const slamOut = win(p, tStrike + 40, tStrike + 400);
   const slam = slamIn * (1 - easeOutBack(slamOut));
@@ -682,6 +688,7 @@ function startFight(ev) {
     });
   }
   FIGHT.durOut = FT.out + (FIGHT.crit ? 240 : 0);
+  if (ev.partner) FIGHT.durOut += 940; // P1-14: 合体技按必杀规格 4.5s+(双立绘同框收势拉长)
   FIGHT.weaponName = ev.w.name;
   const anim = (ev.w.anim) || { kind: 'dash', color: '#ffb84a' };
   FIGHT.animKind = anim.kind;
@@ -710,15 +717,16 @@ function startFight(ev) {
     const from = Math.min(ev.def.maxhp, ev.def.hp + ev.dmg);
     const seg = Math.max(1, Math.round(ev.def.maxhp / 10));
     const per = FIGHT.crit ? 26 : 40;
+    // P1-14: 白闪/震屏/扣血全部锚定镜3 命中瞬间(impact)——切镜黑场后直接命中特写, 镜2只看出招
     FX.hpAnim = { u: ev.def, from, to: ev.def.hp,
-                  t0: now + FT.strike + (FIGHT.crit ? 120 : 0),
+                  t0: now + FT.impact + (FIGHT.crit ? 120 : 0),
                   per, seg, crit: FIGHT.crit };
-    FX.flashT0 = now + FT.strike; FX.flashUntil = now + FT.strike + (FIGHT.crit ? 380 : 260);
-    FX.shakeUntil = now + FT.strike + 500;
+    FX.flashT0 = now + FT.impact; FX.flashUntil = now + FT.impact + (FIGHT.crit ? 380 : 260);
+    FX.shakeUntil = now + FT.impact + (FIGHT.crit ? 560 : 380);
     if (ev.killed) {
       // P1-5: 击破情绪峰值 — HP归零瞬间白闪定格~500ms, 再接攻方胜利台词(motto)大字
       const zeroTicks = Math.ceil(from / seg);          // 逐格归零所需格数
-      FIGHT.killAt = FT.strike + (FIGHT.crit ? 120 : 0) + zeroTicks * per;
+      FIGHT.killAt = FT.impact + (FIGHT.crit ? 120 : 0) + zeroTicks * per;
       FIGHT.durOut = FIGHT.killAt + 500 + 980;          // 定格500ms + 台词停留~1s
     } else FIGHT.killAt = 0;
   }
@@ -1412,12 +1420,37 @@ function drawFightBackdrop(now, CW, CH, outA) {
 }
 
 // ============ B2: 战斗场景渲染(FIGHT.active 期间由 draw 调) ============
+// ============ P1-14: 三镜相机(独立镜头状态: 推拉/注视点/切镜黑场; 纯表现层, 只读 FT 时间轴) ============
+// 镜1 起手特写: s 1.04→1.30 缓推攻方半身; 镜2 攻击全景: 拉回 ~1.02; 镜3 命中特写: 守方中景 s~1.16。
+// 切镜点(cut1/cut2)各接 cutMs 黑场(1→0 衰减), 机战标志性剪辑——黑场遮住机位跳变。
+function fightCam(p, attFx, attFy, defFx, defFy) {
+  const CW = cv.width, CH = cv.height;
+  let s, fx, fy, bx = CW * 0.40, by = CH * 0.46; // 注视点落屏位置: 镜1攻方偏左(身后留空间)
+  const S2 = FT.cut1 + FT.cutMs, S3 = FT.cut2 + FT.cutMs;
+  if (p < FT.cut1) { // 镜1: smoothstep 缓推(慢工出细活, 不硬怼)
+    const u = Math.max(0, (p - FT.enter) / (FT.cut1 - FT.enter));
+    const e = u * u * (3 - 2 * u);
+    s = 1.04 + 0.26 * e; fx = attFx; fy = attFy;
+  } else if (p < S3) { // 镜2: 从特写拉回全景(切镜黑场遮住跳变)
+    const u = win(p, S2 - 120, FT.cut2);
+    s = 1.30 - 0.28 * u; fx = CW * 0.5; fy = CH * 0.52; bx = CW * 0.5; by = CH * 0.52;
+  } else { // 镜3: 守方中景(受击表演是主角)
+    const u = win(p, S3, S3 + 240);
+    s = 1.02 + 0.14 * u; fx = defFx; fy = defFy; bx = CW * 0.58; by = CH * 0.46;
+  }
+  let black = 0; // 切镜黑场
+  if (p >= FT.cut1 && p < FT.cut1 + FT.cutMs) black = 1 - (p - FT.cut1) / FT.cutMs;
+  else if (p >= FT.cut2 && p < FT.cut2 + FT.cutMs) black = 1 - (p - FT.cut2) / FT.cutMs;
+  return { s, fx, fy, bx, by, black };
+}
+
 function drawFightScene(nowReal) {
   const ev = FIGHT.ev;
   if (!ev) return;
   const p = nowReal - FIGHT.t0;
   const crit = FIGHT.crit;
   const tStrike = FT.strike + (crit ? 120 : 0);
+  const tImpact = FT.impact + (crit ? 120 : 0); // P1-14: 命中锚点(镜3起): 白闪/震屏/扣血/守方登场受击
   const killAt = FIGHT.killAt || 0;
   // P1-5: 击破定格 — 定格窗口内全场景时间冻结(火花悬停/立绘定住), 只有白闪在衰减
   const now = (ev.killed && p >= killAt && p < killAt + 500)
@@ -1442,28 +1475,27 @@ function drawFightScene(nowReal) {
   const attX = -380 + ease * (attRestX + 380);
   const defW0 = FIGHT.defIsPortrait ? PH * (FIGHT.defImg.width / FIGHT.defImg.height) : 400;
   const defRestX = CW - 96 - defW0;
-  // 攻方独占镜头位: 蓄力期推近(放大1.16x+向画面中央偏移), 命中帧切回双人对峙位
-  const soloP = win(p, FT.enter + 80, tStrike - 120) * (1 - win(p, tStrike - 120, tStrike + 30));
-  const attScale = 1 + 0.16 * soloP;
-  const attDX = 132 * soloP;
-  // 守方登场: 击打瞬间才入场(受击姿态+白闪遮住入画点), 之前完全不在画面
-  const defEnterP = win(p, tStrike - 80, tStrike + 40);            // 登场进度(命中前80ms起滑入)
+  // P1-14: 推近/拉回全部交给三镜相机(fightCam), 立绘自身不再做镜头位移——独占感由镜1特写表达
+  const attScale = 1;
+  const attDX = 0;
+  // 守方登场: 镜3 黑场切镜中滑入(命中特写一开场守方已在画), 之前完全不在画面
+  const defEnterP = win(p, tImpact - 90, tImpact + 30);            // P1-14: 登场进度(命中前90ms起, 黑场遮切入画)
   const defSlideIn = Math.pow(1 - defEnterP, 3) * 300;             // 从右屏外被"打入"画面(ease-out)
-  let defExit = 0, defAlpha = win(p, tStrike - 80, tStrike - 10);  // 入画淡入极快(60ms)
+  let defExit = 0, defAlpha = win(p, tImpact - 90, tImpact - 20);  // 入画淡入极快
   let defSink = 0;                                                 // 击破: 倒下沉降
   if (ev.killed) {
     // 击破: 定格期必须在场(冻结帧), 击破大字播放时倒下退场
     if (p >= killAt + 500) defSink = win(p, killAt + 500, killAt + 950) * 44;
     defAlpha *= 1 - win(p, killAt + 520, killAt + 980);
   } else {
-    // 受击完毕退场收势: 峰值落定后稍驻留, 随即向右离场(攻方独占收势)
-    defExit = win(p, tStrike + 560, tStrike + 900) * 190;
-    defAlpha *= 1 - win(p, tStrike + 700, tStrike + 1000);
+    // 受击完毕退场收势: 峰值落定后稍驻留, 随即向右离场(镜3 内完成, 攻方独占收势)
+    defExit = win(p, tImpact + 470, tImpact + 830) * 190;
+    defAlpha *= 1 - win(p, tImpact + 620, tImpact + 960);
   }
   const defX = defRestX + defSlideIn + defExit;
   const defW = (FIGHT.defIsPortrait ? PH : 420) * (FIGHT.defImg.width / FIGHT.defImg.height); // 与 drawPuppet 返回宽一致(FX 端点用)
-  // P1-9: 受击后仰进度(守方 puppet 姿态驱动); 击破定格期间姿态锁在峰值帧
-  const hitP = win(p, tStrike, tStrike + 430);
+  // P1-9: 受击后仰进度(守方 puppet 姿态驱动); 击破定格期间姿态锁在峰值帧; P1-14: 受击窗口在镜3
+  const hitP = win(p, tImpact, tImpact + 430);
   const recoil = (hitP > 0 && hitP < 1) ? Math.sin(hitP * Math.PI) : 0;
   const freezeHit = !!ev.killed && p >= killAt && p < killAt + 500;
   let defShakeX;
@@ -1479,12 +1511,20 @@ function drawFightScene(nowReal) {
   // P1-9: 双方 puppet 姿态(像素小人走整图变换: 64px 源图切三层会裂)
   const attPose = fightAttPose(p, now, tStrike);
   attPose.whole = !FIGHT.attIsPortrait;
-  const defPose = fightDefPose(p, now, tStrike, FIGHT.isMiss, crit, freezeHit, FIGHT.defIsPortrait);
+  const defPose = fightDefPose(p, now, tImpact, FIGHT.isMiss, crit, freezeHit, FIGHT.defIsPortrait);
   defPose.whole = !FIGHT.defIsPortrait;
 
   // --- 守方(P1-11: 只在登场~退场窗口内绘制; 落空残影/受击/侧闪由 puppet 姿态表达) ---
   const defH = FIGHT.defIsPortrait ? PH : 420; // 无立绘角色 sprite 放大到 420
   const defY = standY + (FIGHT.defIsPortrait ? 0 : 100) + defSink;
+  // P1-14: 三镜相机 — 镜1攻方半身/镜2全景/镜3守方中景, 切镜黑场由 fightCam 给出
+  const attH0e = FIGHT.attIsPortrait ? PH : 420;
+  const attWrest = attH0e * (FIGHT.attImg.width / FIGHT.attImg.height);
+  const cam = fightCam(p,
+    attX + attDX + attWrest * 0.5, standY + (FIGHT.attIsPortrait ? 0 : 100) + attH0e * 0.40,
+    defRestX + defW * 0.45, defY + defH * 0.42);
+  ctx.save();
+  ctx.translate(cam.bx, cam.by); ctx.scale(cam.s, cam.s); ctx.translate(-cam.fx, -cam.fy);
   // 站位脚下阴影(人站在雪地上, 不是飘在背景前)
   if (defAlpha > 0.01) {
     ctx.fillStyle = 'rgba(8,8,16,.42)';
@@ -1550,8 +1590,8 @@ function drawFightScene(nowReal) {
     }
   }
 
-  // --- 蓄力光球(攻方右前方=出手点; chargeP=蓄力进度驱动光球聚合) ---
-  const chargeP = win(p, FT.enter, tStrike);
+  // --- 蓄力光球(攻方右前方=出手点; chargeP=蓄力进度驱动光球聚合; P1-14: 镜1内蓄满定格) ---
+  const chargeP = win(p, FT.enter, FT_READY);
   let gunX = attX + attDX + attLunge + (FIGHT.attIsPortrait ? 300 : 250);
   let gunY = attY + attH * 0.42;
   if (FIGHT.comboPartner) {
@@ -1573,8 +1613,29 @@ function drawFightScene(nowReal) {
   }
   FIGHT.gunX = gunX; FIGHT.gunY = gunY;
 
-  // --- 出招特效(落空不出招) ---
-  const strikeP = win(p, tStrike - 50, tStrike + 220);
+  // --- P1-14 六脉神剑专项: 指尖凝气光球(镜1人物全程在画, 凝气≥0.5s 硬指标; 出招后甩出成束) ---
+  if (FIGHT.animKind === 'beam' && !FIGHT.isMiss) {
+    const orbP = win(p, FT.enter + 150, tStrike + 100); // 凝气窗口 ~1.9s(硬指标≥0.5s)
+    if (orbP > 0) {
+      const orbA = (1 - win(p, tStrike + 30, tStrike + 150)) * outA; // 出招后光球甩出成束
+      const orR = 8 + orbP * 24 + Math.sin(now / 70) * 3;
+      const og = ctx.createRadialGradient(gunX, gunY, 0, gunX, gunY, orR * 2.4);
+      og.addColorStop(0, '#ffffff'); og.addColorStop(0.4, '#bfefff'); og.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = orbA * (0.55 + 0.45 * orbP);
+      ctx.fillStyle = og;
+      ctx.beginPath(); ctx.arc(gunX, gunY, orR * 2.4, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = orbA * 0.8; // 凝气环两道(呼吸收束)
+      ctx.strokeStyle = '#dff6ff'; ctx.lineWidth = 2;
+      for (let k = 0; k < 2; k++) {
+        const rr4 = orR * (1.5 + k * 0.55) + Math.sin(now / 130 + k * 2.1) * 3;
+        ctx.beginPath(); ctx.arc(gunX, gunY, rr4, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // --- 出招特效(落空不出招; P1-14: 镜2爆发→跨切镜→镜3命中余韵) ---
+  const strikeP = win(p, tStrike - 40, tImpact + 160);
   const defCx = defX + defW * 0.45, defCy = defY + defH * 0.42;
   if (!FIGHT.isMiss && strikeP > 0 && strikeP <= 1)
     drawWeaponFx(strikeP, p, now, gunX, gunY, defCx, defCy, attX + attLunge, attY, attH);
@@ -1582,7 +1643,7 @@ function drawFightScene(nowReal) {
   // --- 命中: 火花+伤害大字+击破 / 落空: 闪避大字 ---
   if (FIGHT.isMiss) {
     drawSparks(now);
-    const dp = win(p, tStrike + 60, tStrike + 900);
+    const dp = win(p, tImpact + 60, tImpact + 900);
     if (dp > 0 && dp < 1) {
       const pop = dp < 0.18 ? dp / 0.18 : 1;
       ctx.save();
@@ -1598,22 +1659,22 @@ function drawFightScene(nowReal) {
       ctx.fillText(word, defCx, ty);
       ctx.restore();
     }
-  } else if (p >= tStrike) {
-    if (p - tStrike < 70) spawnSparks(defCx, defCy, FIGHT.animColor, crit ? 26 : 15);
+  } else if (p >= tImpact) {
+    if (p - tImpact < 70) spawnSparks(defCx, defCy, FIGHT.animColor, crit ? 26 : 15);
     // P1-7: 合体技接力二段 — 搭档晚~130ms接力出手, 金色火花补爆+震屏追加(一次性)
-    if (FIGHT.comboPartner && !FIGHT._relaySparked && p >= tStrike + 130) {
+    if (FIGHT.comboPartner && !FIGHT._relaySparked && p >= tImpact + 130) {
       spawnSparks(defCx, defCy, '#ffd24a', 18);
       FX.shakeUntil = Math.max(FX.shakeUntil, performance.now() + 420);
       FIGHT._relaySparked = true;
     }
-    // P1-12: 太祖长拳连打第二拳 — 守方处补爆火花+轻震(一次性, 与特效第二爆同帧)
-    if (FIGHT.animKind === 'dash' && !FIGHT._hit2Sparked && p >= tStrike + 150) {
+    // P1-12: 太祖长拳连打第二拳 — 守方处补爆火花+轻震(一次性, 对齐特效第二爆在镜3 的峰值)
+    if (FIGHT.animKind === 'dash' && !FIGHT._hit2Sparked && p >= tImpact + 120) {
       spawnSparks(defCx, defCy, FIGHT.animColor, 10);
       FX.shakeUntil = Math.max(FX.shakeUntil, performance.now() + 160);
       FIGHT._hit2Sparked = true;
     }
     drawSparks(now);
-    const dp = win(p, tStrike + 60, tStrike + 980);
+    const dp = win(p, tImpact + 60, tImpact + 980);
     if (dp > 0 && dp < 1) {
       const pop = dp < 0.18 ? dp / 0.18 : 1;
       ctx.save();
@@ -1634,6 +1695,7 @@ function drawFightScene(nowReal) {
       ctx.restore();
     }
   } else drawSparks(now);
+  ctx.restore(); // P1-14: 三镜相机结束(以上场景吃镜头; 以下标题/提示/血条为 HUD 不吃镜头)
 
   // --- 顶部: 武器名标题(入位后浮现); 合体技升级: 金漆组合名+双侠副题 ---
   const titleA = win(p, FT.enter - 80, FT.enter + 60) * (1 - win(p, tStrike - 60, tStrike + 60));
@@ -1682,6 +1744,11 @@ function drawFightScene(nowReal) {
   drawFightHpBar(ev.def, CW * 0.54, CH - 96, true);
   ctx.restore();
   ctx.restore();
+  if (cam.black > 0.004) { // 切镜黑场压最上(机战标志性剪辑: 镜间 170ms 全黑)
+    ctx.save(); ctx.globalAlpha = Math.min(1, cam.black);
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, CW, CH);
+    ctx.restore();
+  }
 
   // ==== P1-5: 击破情绪峰值(白闪定格 → 击破大字 → 攻方胜利台词) ====
   if (ev.killed) {
