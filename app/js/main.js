@@ -62,6 +62,7 @@ function loadGame() {
     FX.bigText = null; FX.portrait = null; FX.cutinRight = false;
     Sel.unit = null; Sel.moveTiles = null; Sel.atkTiles = null; Sel.pending = null;
     hideMenus(); showInfo(null);
+    document.getElementById('loseModal').classList.add('hidden'); // P3-12 D4: 败北画面一并收
     for (const k in FACE) delete FACE[k];
     deserialize(payload.state);
     if (payload.switches) {
@@ -2222,6 +2223,7 @@ function openMenu(u) {
   const anyFoe = G.units.some(v => v.hp > 0 && v.side === 'enemy');
   if (anyFoe) items.push(['攻击', () => openWeaponMenu(u)]);
   if (u.spirits.length) items.push(['运功', () => openSpiritMenu(u)]);
+  if (Object.keys(ITEMS).some(id => (G.items[id] || 0) > 0)) items.push(['道具', () => openItemMenu(u)]); // P3-12 D3
   const speakTarget = G.units.find(v => canSpeak(u, v));
   if (speakTarget) items.push([`<span style="color:#8fd08f">说得 ${speakTarget.cn}</span>`, () => doSpeak(u, speakTarget)]);
   if (canCombo(u)) items.push([`<span style="color:#ffd24a">合体技·双侠镇襄阳</span>`, () => openComboMenu(u)]);
@@ -2242,6 +2244,48 @@ function renderMenu(items) {
   actionMenu.classList.remove('hidden');
 }
 function hideMenus() { actionMenu.classList.add('hidden'); }
+
+// P3-12 D3: 道具菜单 —— 列出库存, 选后按 target 类型走二级目标列表(自身直用)
+function openItemMenu(u) {
+  const ids = Object.keys(ITEMS).filter(id => (G.items[id] || 0) > 0);
+  if (!ids.length) { log('道具袋已空'); openMenu(u); return; }
+  showForecast('道具（全队共享）', ids.map(id => {
+    const it = ITEMS[id];
+    const tgts0 = itemTargets(u, id); // 展示用快照(模态开着局面不会变); 真正执行时 fn 内会重算
+    return {
+      name: `${it.name} ×${G.items[id]} <span class="dim">${it.desc}</span>`,
+      sub: tgts0.length ? (it.target === 'self' ? '对自身使用' : `可用目标: ${tgts0.map(t => t.cn).join('、')}`) : '没有可用目标',
+      fn: () => {
+        const tgts = itemTargets(u, id); // 点击时重算, 不用打开菜单时的旧快照
+        if (!tgts.length) { log('没有可用目标'); openItemMenu(u); return; }
+        if (it.target === 'self' || tgts.length === 1) return doUseItem(u, id, tgts[0]);
+        showForecast(`${it.name} → 选择目标`, tgts.map(t => ({
+          name: `${t.cn} <span class="dim">HP ${t.hp}/${t.maxhp} 真气 ${t.sp}/${t.maxsp}</span>`,
+          sub: '', fn: () => doUseItem(u, id, t)
+        })), () => openItemMenu(u));
+      }
+    };
+  }), () => openMenu(u));
+}
+
+// P3-12 D3: 使用道具 —— 规则层 useItem 落账, 这里给玩家看见(绿飘字+角色色环+日志)。
+// 使用道具消耗本回合行动(FE/SRW 惯例: 道具=一个指令)。
+async function doUseItem(u, itemId, target) {
+  const r = useItem(u, itemId, target);
+  if (!r) { log('使用失败'); openMenu(u); return; }
+  seSpirit(); // 道具轻音, 与运功同号
+  const bits = [];
+  if (r.gains.hp) bits.push('体力+' + r.gains.hp);
+  if (r.gains.sp) bits.push('真气+' + r.gains.sp);
+  if (r.gains.will) bits.push('气势+' + r.gains.will);
+  if (r.item.effect.dust) bits.push('命中-' + r.item.effect.dust + '(下次行动后恢复)');
+  const now = performance.now();
+  FX.ringFx = { x: target.x, y: target.y, color: '#8fd08f', t0: now, until: now + 640 };
+  FX.floats.push({ x: target.x, y: target.y, text: '【' + r.item.name + '】' + bits.join(' '), color: '#8fd08f', t0: now });
+  log(`<span style="color:#8fd08f">${u.cn} 使用【${r.item.name}】→ ${target.cn}: ${bits.join(' ')}</span>`);
+  await sleep(300);
+  finishUnit(u, true);
+}
 
 // 选武功 + 预测窗口
 function openWeaponMenu(u) {
@@ -2318,6 +2362,7 @@ function openSpiritMenu(u) {
           else log('没有邻接友军');
         } else {
           u.buffs[s.fx] = true;
+          u.buffs._castTurn = G.turn; // P3-12 D3(AUDIT#46): 运功buff标施放回合, 下次行动结束时到期
           log(`${u.cn}运功【${s.name}】:${s.desc}`);
         }
         await spiritFx(u, s); // P1-6: 运功演出(大字+色环+头顶小字), 再结束行动
@@ -2522,6 +2567,7 @@ async function spiritFx(u, s) {
 
 function finishUnit(u, keepMenuOpen) {
   u.acted = true;
+  expireTurnBuffs(u); // P3-12 D3(AUDIT#46): 上回合运的功, 本次行动结束即到期(热血不再永久×2)
   Sel.unit = null; Sel.moveTiles = null; Sel.atkTiles = null; Sel.pending = null;
   hideMenus();
   if (!keepMenuOpen) {}
@@ -2610,7 +2656,7 @@ async function enemyPhase() {
 }
 
 function clearBuffs(u) {
-  ['mustHit', 'dmg2', 'halfDmg', 'mov3'].forEach(k => delete u.buffs[k]);
+  ['mustHit', 'dmg2', 'halfDmg', 'mov3', 'dust'].forEach(k => delete u.buffs[k]); // dust=P3-12 D3 石灰粉
   if (u.buffs.evade === false) delete u.buffs.evade;
 }
 
@@ -2627,9 +2673,22 @@ function checkEnd() {
     setTimeout(() => { RESULT.active = true; RESULT.t0 = performance.now(); }, 1500);
   } else if (!playersAlive || (hero && hero.hp <= 0)) {
     G.over = true; G.result = 'lose';
-    banner('我方全灭……', 3000);
-    setTimeout(() => { if (confirm('失败了……重新开始？')) location.reload(); }, 1200);
+    banner('我方全灭……', 2200);
+    // P3-12 D4(AUDIT#39): 体面败北出口 —— 画面内直接给「读档/重开」两个按钮, 不再 confirm+整页刷新
+    setTimeout(() => showLose(), 1300);
   }
+}
+
+// P3-12 D4: 败北画面(DOM 模态, 与开场同风格) —— 读档回回合检查点(需有档), 或重开一周目。
+// 任何残留模态(道具/预测)一并收起 —— 败北可从敌方回合触发, 玩家可能正开着道具菜单(AUDIT#47)。
+function showLose() {
+  const hasSave = !!(typeof localStorage !== 'undefined' && localStorage.getItem(SAVE_KEY));
+  const btn = document.getElementById('loseLoadBtn');
+  btn.disabled = !hasSave;
+  btn.textContent = hasSave ? '读档（回到回合检查点）' : '读档（无存档）';
+  document.getElementById('forecast').classList.add('hidden');
+  hideMenus();
+  document.getElementById('loseModal').classList.remove('hidden');
 }
 
 function updateTop() {
@@ -2749,7 +2808,7 @@ document.getElementById('counterBtn').onclick = e => {
   e.target.textContent = '反击:' + (AUTO_COUNTER ? '自动' : '手动');
 };
 document.getElementById('helpBtn').onclick = () => {
-  alert('操作:\n点击我方单位 -> 点蓝格移动 -> 在菜单选指令\n攻击: 选武功(看命中/伤害预测) -> 点黄圈内的敌人\n运功: 耗真气发动(凝神必中/热血×2/游身闪避...)\n韦小宝邻接残血辽将 -> 说得收服\n萧峰郭靖相邻且气势≥120 -> 合体技「双侠镇襄阳」\n敌方回合可反击(选武功或硬吃攒气势)\n存档: 我方回合空闲随时可存; 开场/每回合开始自动存档\n败北后刷新页面, 点「读档」回到回合检查点\n胜利条件: 击破段延庆');
+  alert('操作:\n点击我方单位 -> 点蓝格移动 -> 在菜单选指令\n攻击: 选武功(看命中/伤害预测) -> 点黄圈内的敌人\n运功: 耗真气发动(凝神必中/热血×2/游身闪避...), 效果持续到下次行动结束\n道具: 全队共享道具袋(金创药回血/九花回内/女儿红攒气势/石灰粉糊敌脸), 用道具=用掉本回合行动\n韦小宝邻接残血辽将 -> 说得收服\n萧峰郭靖相邻且气势≥120 -> 合体技「双侠镇襄阳」\n敌方回合可反击(选武功或硬吃攒气势)\n存档: 我方回合空闲随时可存; 开场/每回合开始自动存档\n败北后可直接「读档」回回合检查点, 或重开\n胜利条件: 击破段延庆');
 };
 // P3-12 D1: 存档/读档按钮(准入见 saveLoadIdle)
 document.getElementById('saveBtn').onclick = () => {
@@ -2760,6 +2819,12 @@ document.getElementById('loadBtn').onclick = () => {
   if (!saveLoadIdle()) { log('战斗或演出进行中，不能读档'); return; }
   loadGame();
 };
+// P3-12 D4: 败北画面两个出口 —— 读档直接回检查点(不经过 saveLoadIdle, G.over 状态由档内覆盖), 重开=刷新
+document.getElementById('loseLoadBtn').onclick = () => {
+  document.getElementById('loseModal').classList.add('hidden');
+  if (!loadGame()) log('读档失败, 请重开');
+};
+document.getElementById('loseRestartBtn').onclick = () => location.reload();
 // 空格/回车也可推进剧情(与点击同权; 测试台 window 无 addEventListener, 防御式注册)
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('keydown', e => {

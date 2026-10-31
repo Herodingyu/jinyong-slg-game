@@ -47,6 +47,22 @@ const SPIRIT_BOOK = {
   shenxing:{name:'神行',  cost:15, fx:'mov3',     desc:'移动力+3'},
 };
 
+// ============ P3-12 D3: 道具系统(DEV_PLAN D3; 数值全在此, 规则在 engine.useItem/itemTargets) ============
+// target: self=仅自身 / ally=自身或邻接友方 / enemy=邻接敌方(撒石灰)
+// effect: healPct/spPct/willAdd=立即结算; dust=攻击方命中下降debuff(power=降点, 挂到敌方身上,
+//         敌方每次行动后由表现层 clearBuffs 清除 —— 即"持续到其下次行动结束")
+// init=序章初始携带数(全队共享道具袋; G.items 在 serialize 里随档走)
+const ITEMS = {
+  jinchuang: { name:'金创药',     target:'ally',  effect:{ healPct:0.35 }, init:2,
+               desc:'体力回复35%' },
+  jiuhua:    { name:'九花玉露丸', target:'ally',  effect:{ spPct:0.45 },   init:2,
+               desc:'真气回复45%' },
+  nuerrhong: { name:'女儿红',     target:'self',  effect:{ willAdd:25 },   init:1,
+               desc:'气势+25(机战式攒气, 为合体技/大招铺垫)' },
+  shihui:    { name:'石灰粉',     target:'enemy', effect:{ dust:40 },      init:1,
+               desc:'邻接敌方命中-40, 至其下次行动结束(韦小宝式保命)' },
+};
+
 // ============ P3-12(D2) 经验与升级(AUDIT#12: 一周目要成立, 成长必须可见) ============
 // 规则全在 engine.gainExp: 满 need 升级(溢出结转), 升级按 growth 概率roll中才加点(可注入RNG测试)
 // 命中即有参与感经验, 击破大头=敌方等级×10(模板 lv); 体力成长同步回血(机战式升级修理感)

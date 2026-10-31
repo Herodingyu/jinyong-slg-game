@@ -74,6 +74,8 @@ function forecast(att, def, w) {
   const tE = TERRAIN[terrainAt(def.x, def.y)];
   const tA = TERRAIN[terrainAt(att.x, att.y)];
   let hitp = 90 + (att.hit - def.evd) * 0.4 + (w.hit - 85) * 0.6 - tE.eva * 0.5 + (tA.def ? 0 : 0);
+  // P3-12 D3: 石灰粉debuff(ITEMS[x].effect.dust 挂到攻击方) —— 命中下降在clamp前, mustHit仍凌驾一切
+  if (att.buffs.dust) hitp -= att.buffs.dust;
   hitp = Math.max(5, Math.min(97, Math.round(hitp)));
   if (att.buffs.mustHit) hitp = 100; // 必中buff凌驾命中率上限(放在clamp后, 否则被压回97)
   let dmg = w.pow + att.atk * 4 - def.def * 3;
@@ -147,6 +149,43 @@ function gainExp(u, n, rng) {
     ups.push({ lv: u.lv, gains });
   }
   return ups;
+}
+
+// ============ P3-12 D3: 道具系统规则(纯函数; 消耗/目标校验/效果落账全在引擎, 表现层只管演出) ============
+// itemTargets: 该道具当前对 u 可用的目标列表(按 ITEMS[x].target 过滤邻接关系)
+function itemTargets(u, itemId) {
+  const it = ITEMS[itemId];
+  if (!it || (G.items[itemId] || 0) <= 0) return [];
+  const adj = v => Math.abs(v.x - u.x) + Math.abs(v.y - u.y) === 1;
+  if (it.target === 'self')  return [u];
+  if (it.target === 'ally')  return G.units.filter(v => v.hp > 0 && v.side === 'player' && (v === u || adj(v)));
+  if (it.target === 'enemy') return G.units.filter(v => v.hp > 0 && v.side === 'enemy' && adj(v));
+  return [];
+}
+// useItem: 消耗1件并落账效果。目标不合法/无库存返回 null(调用方退回菜单)。
+// 返回 {item, target, gains:{hp,sp,will}} 供演出层飘字; dust 走 target.buffs(无 gains)。
+function useItem(u, itemId, target) {
+  const it = ITEMS[itemId];
+  if (!it || (G.items[itemId] || 0) <= 0) return null;
+  if (!target || itemTargets(u, itemId).indexOf(target) < 0) return null;
+  G.items[itemId]--;
+  const eff = it.effect, gains = {};
+  if (eff.healPct) { const h = Math.round(target.maxhp * eff.healPct); const r = Math.min(target.maxhp - target.hp, h); target.hp += r; if (r > 0) gains.hp = r; }
+  if (eff.spPct)   { const s = Math.round(target.maxsp * eff.spPct);   const r = Math.min(target.maxsp - target.sp, s); target.sp += r; if (r > 0) gains.sp = r; }
+  if (eff.willAdd) { const w = Math.min(target.maxwill - target.will, eff.willAdd); target.will += w; if (w > 0) gains.will = w; }
+  if (eff.dust)    { target.buffs.dust = eff.dust; } // 命中debuff挂攻击方(敌方), 行动后 clearBuffs 清除
+  return { item: it, target, gains };
+}
+
+// P3-12 D3: 回合制运功buff到期(AUDIT#46修复) —— 运功时给buff标注施放回合(_castTurn),
+// 单位下次行动结束(finishUnit)时, 早于当前回合施放的一律清除。
+// 修的是老bug: 玩家运功buff从不清除 → 热血永久×2 = 无脑最优解(违反平衡清单「强招代价」)。
+// 生命期对齐玩家心智: 第N回合运功(本回合行动已用掉) → 保护/生效到第N+1回合行动为止。
+// 敌方不走此函数: 敌方buff在每次行动后由表现层 clearBuffs 清除(既有老路)。
+function expireTurnBuffs(u) {
+  if ((u.buffs._castTurn | 0) >= G.turn) return; // 本回合刚运的功, 留到下次行动结束
+  for (const k of ['mustHit', 'dmg2', 'halfDmg', 'mov3']) delete u.buffs[k];
+  delete u.buffs._castTurn;
 }
 
 // 可反击的武功列表
@@ -309,6 +348,8 @@ const G = {
   // P3-11b: 评价结算数据源(AUDIT#14)。击破数在 resolveAttack 结算, 说得数在 doSpeak 结算
   // P3-12a: foes=敌总量(初始+阶段援军), 结算画面「击破敌军 x/foes」用
   stats: { kills: 0, speaks: 0, foes: 0 },
+  // P3-12 D3: 全队共享道具袋(初始库存按 data.js ITEMS[x].init), 随档走
+  items: Object.fromEntries(Object.keys(ITEMS).map(k => [k, ITEMS[k].init])),
 };
 
 // ============ P3-12 D1: 存档/读档(纯规则层序列化, 表现层只管 localStorage 读写) ============
@@ -332,6 +373,7 @@ function serialize() {
     turn: G.turn, phase: G.phase, over: !!G.over,
     comboUsed: !!G.comboUsed, result: G.result,
     stats: Object.assign({}, G.stats),
+    items: Object.assign({}, G.items), // P3-12 D3: 道具栏随档走
     units,
   };
 }
@@ -347,4 +389,6 @@ function deserialize(s) {
   G.turn = s.turn; G.phase = s.phase; G.over = !!s.over;
   G.comboUsed = !!s.comboUsed; G.result = s.result;
   G.stats = Object.assign({}, s.stats);
+  // P3-12 D3: 老档无道具栏时按 ITEMS 初始库存兜底
+  G.items = Object.assign({}, Object.fromEntries(Object.keys(ITEMS).map(k => [k, ITEMS[k].init])), s.items);
 }
