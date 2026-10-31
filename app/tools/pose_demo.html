@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>PosePlayer 演示 · 萧峰 idle→ready→strike→hit</title>
+<style>
+  body { margin: 0; background: #101018; color: #cfd2e0; font: 14px/1.5 monospace; }
+  #wrap { display: flex; flex-direction: column; align-items: center; padding: 12px; }
+  canvas { background: #1b2030; border: 1px solid #333a52; }
+  #hud { margin-top: 8px; white-space: pre; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv" width="640" height="480"></canvas>
+  <div id="hud">加载中…</div>
+</div>
+<script src="../js/poseanim.js"></script>
+<script>
+// ============ PosePlayer 独立演示页（B方案切帧动画验收用） ============
+// 模拟一场战斗的完整时间轴（2400ms）：idle 呼吸 → ready 定格蓄势 → strike 上步出招 → hit 受击后仰。
+// 帧表带 ox/oy/rot/scale/scaleY(squash-stretch 0.94~1.06)，帧间 125ms crossfade + 一阶插值补间。
+// 供 tools/capture_pose.js 用 window.__seek(t) 确定性截 12 帧到 evidence/pose_player/。
+'use strict';
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const hud = document.getElementById('hud');
+
+const DUR = 2400;              // 演示总时长 ms
+const player = { frames: null, pl: null, imgs: {} };
+
+// 帧表：idle(0~700, 两段呼吸) ready(700~1250) strike(1250~1850) hit(1850~2400)
+// 相邻帧窗口首尾相接，crossfade=125ms 自动落在接缝前
+function buildFrames(poseSet) {
+  const P = k => poseSet.poses[k] && poseSet.poses[k].ok ? poseSet.poses[k].img : null;
+  const mk = (k, t0, t1, e) => Object.assign({ img: P(k), tStart: t0, tEnd: t1 }, e);
+  return [
+    mk('idle',   0,    350,  { oy: 0,  rot: 0,  scaleY: 1.00 }),
+    mk('idle',   350,  700,  { oy: -4, rot: 0,  scaleY: 1.02 }),  // 呼吸起伏
+    mk('ready',  700,  1250, { ox: 6,  oy: 6,  rot: 2,  scaleY: 0.96 }), // 沉身定格蓄势
+    mk('strike', 1250, 1850, { ox: 44, oy: 0,  rot: 6,  scaleY: 1.04 }), // 上步出招前送
+    mk('hit',    1850, 2400, { ox: -20,oy: 4,  rot: -10,scaleY: 0.94 }), // 受击后仰弯腰
+  ];
+}
+
+// 确定性渲染：t=演出内相对毫秒（截图脚本逐帧调用，避免真实 rAF 的不确定）
+function renderAt(t) {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  // 程序背景（与战斗演出同风格雪夜色，零素材）
+  const g = ctx.createLinearGradient(0, 0, 0, cv.height);
+  g.addColorStop(0, '#232a44'); g.addColorStop(1, '#141827');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = 'rgba(8,8,16,.42)';
+  ctx.beginPath(); ctx.ellipse(320, 402, 110, 14, 0, 0, Math.PI * 2); ctx.fill();
+
+  const inst = player.pl.update(t);
+  const h = 300, x = 320 - (h * 240 / 376) / 2, y = 400 - h; // 脚底锚定(320,400)
+  // 姿势图缺该帧时画红框占位（验收时一眼看出缺图）
+  if (!inst.img) {
+    ctx.strokeStyle = '#ff5050'; ctx.lineWidth = 3;
+    ctx.strokeRect(x, y, h * 240 / 376, h);
+  } else {
+    player.pl.paint(ctx, inst, x, y, h, false);
+  }
+  hud.textContent = 't=' + String(t).padStart(4, ' ') + 'ms  frame#' + inst.frameIdx +
+    '  alpha=' + inst.alpha.toFixed(2) + '  ox=' + inst.ox.toFixed(1) +
+    '  rot=' + inst.rot.toFixed(1) + '  scaleY=' + inst.scaleY.toFixed(2) +
+    (inst.done ? '  [done]' : '');
+  return inst;
+}
+
+window.__demoReady = (async () => {
+  // demo 页在 tools/ 子目录，资源根需上跳一级；main.js 在 app 根时默认 'assets' 即可
+  const poseSet = PoseSet.load('xiaofeng', { base: '../assets' });
+  await poseSet.ready();
+  player.pl = new PosePlayer(buildFrames(poseSet), { crossfade: 125 });
+  renderAt(0);
+  // 对 capture 脚本暴露：确定性 seek + 当前姿势图加载明细
+  window.__seek = t => renderAt(t);
+  window.__poseInfo = Object.fromEntries(Object.entries(poseSet.poses).map(([k, s]) => [k, s ? (s.ok ? 'ok:' + s.from : 'null') : 'null']));
+  return true;
+})();
+</script>
+</body>
+</html>
