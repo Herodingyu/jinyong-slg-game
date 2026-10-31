@@ -471,9 +471,9 @@ function fightAttPhase(p, tStrike, tImpact) {
   if (p < FT.out) return 'impact';   // 镜3: 命中后收势段
   return 'out';
 }
-function drawCombatant(slot, img, x, y, h, mirror, alpha, pose, phase) {
+function drawCombatant(slot, img, x, y, h, mirror, alpha, pose, phase, p) {
   const r = (typeof window !== 'undefined' && window.POSE_RENDERERS) ? window.POSE_RENDERERS[slot] : null;
-  if (r) { r(ctx, { img, x, y, h, mirror, alpha, pose, phase }); return; }
+  if (r) { r(ctx, { img, x, y, h, mirror, alpha, pose, phase, p }); return; }
   drawPuppet(img, x, y, h, mirror, alpha, pose);
 }
 
@@ -1558,7 +1558,7 @@ function drawFightScene(nowReal) {
       drawPuppet(FIGHT.defImg, defX + defShakeX * 0.4, defY, defH, true, 0.22 * outA * defAlpha, defPose);
       drawPuppet(FIGHT.defImg, defX + defShakeX * 0.7, defY, defH, true, 0.12 * outA * defAlpha, defPose);
     }
-    drawCombatant('def', FIGHT.defImg, defX + defShakeX, defY, defH, true, outA * defAlpha, defPose, 'impact'); // P1-14 钩子: 守方登场起 phase 恒 'impact'
+    drawCombatant('def', FIGHT.defImg, defX + defShakeX, defY, defH, true, outA * defAlpha, defPose, 'impact', p); // P1-14 钩子: 守方登场起 phase 恒 'impact'; p 供姿势帧时间轴(pose_bridge)
     // crit 双影(更强打击感)
     if (!FIGHT.isMiss && crit && hitP > 0.05 && hitP < 0.85)
       drawPuppet(FIGHT.defImg, defX + defShakeX - 16 * recoil, defY + 5, defH, true, 0.30 * (1 - hitP) * outA * defAlpha, defPose);
@@ -1597,7 +1597,7 @@ function drawFightScene(nowReal) {
     const relayLunge = win(p, tStrike + 30, tStrike + 170) * (1 - win(p, tStrike + 170, tStrike + 420)) * 46;
     drawPuppet(FIGHT.partnerImg, partnerX + relayLunge, partnerY, partnerH, false, outA, pPose);
   }
-  drawCombatant('att', FIGHT.attImg, attX + attDX + attLunge, attY, attH, false, outA, attPose, fightAttPhase(p, tStrike, tImpact)); // P1-14 钩子: phase 按三镜时间轴映射
+  drawCombatant('att', FIGHT.attImg, attX + attDX + attLunge, attY, attH, false, outA, attPose, fightAttPhase(p, tStrike, tImpact), p); // P1-14 钩子: phase 按三镜时间轴映射; p 供姿势帧时间轴(pose_bridge)
   // P1-12: 瞬步突刺/快拳/双斩的攻方残影 — 身体"动出来"的速度感(身后两层渐淡)
   if (!FIGHT.isMiss && (FIGHT.animKind === 'stab' || FIGHT.animKind === 'dash' || FIGHT.animKind === 'slashx')) {
     const gp = win(p, tStrike - 60, tStrike + 240) * (1 - win(p, tStrike + 240, tStrike + 540));

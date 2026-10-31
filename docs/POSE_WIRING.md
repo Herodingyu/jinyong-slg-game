@@ -201,3 +201,41 @@ if (dps && dps.usable() && defPlayer && !FIGHT.isMiss) {
 4. 断图演练：临时把 `assets/portraits/poses*/xiaofeng_hit.png` 挪走一场演出，
    确认守方自动回退 puppet 不黑屏——**回退路径必须实测，不是目测代码**。
 5. AI 图到位（Agent 1 产出 `assets/portraits/poses/`）后零代码自动升级，重跑第 3 条对比。
+
+---
+
+## 8. 接线落地记录（2026-10-31，三线合并 master 后实际实现）
+
+实现与 §2-4 有两处刻意偏差，均因 P1-14 已把攻/守主绘制点包装为 `drawCombatant` 钩子
+（不再是裸 `drawPuppet` 调用点），按钩子形态做了适配：
+
+### 实际改动面（main.js 仅 3 行 + 2 个新文件 + index.html 2 行）
+
+1. `main.js` `drawCombatant` 形参追加可选 `p`（演出内时间），透传进 opts 对象；
+   攻/守两个调用点各多传一个 `p`（约 1561/1600 行，带 `pose_bridge` 注释）。
+2. 新建 `app/js/pose_bridge.js`（约 130 行）：帧表构建/签名缓存/三级回退/击破冻结
+   全部在此，注册 `window.POSE_RENDERERS = {att, def}`。本文件加载即预载
+   5 个已知立绘角色的 PoseSet（替代 §2 在 startFight 里预载的方案——
+   对未知 sprite 的战斗签名变化时按需补载，避免再动 main.js 热路径）。
+3. `index.html` 脚本链尾追加 `poseanim.js` + `pose_bridge.js`（50-51 行）。
+
+### 与本文档的语义偏差（已知、接受、勿"修正"）
+
+- **单姿势缺图降级用 idle 顶替**（而非 §3 的 img=null 逐帧回退 puppet）：
+  idle 可用但 strike/hit 缺失时，对应帧画 idle 图，避免 puppet/立绘混画闪变；
+  idle 本身缺失（`usable()=false`）才整套回退 puppet。
+- **守方 miss 整体回退 puppet**（§6 铁律的守方版）：落空演出的侧闪/残影是
+  puppet 专属表达，姿势帧不接，语义与 att 非立绘不接一致。
+
+### 验证产物
+
+- `node tools/test_fx_b1.js` 17/17（零行为变化门，合并后 master 复跑通过）。
+- `node tools/test_pose_bridge.js` 20/20：注册断言 / idle→strike 时间窗切换 /
+  crit +120ms 重建 / miss 守方 puppet 回退 / killAt 冻结窗全扫无异常 /
+  拔钩子后逐字节走 drawPuppet 的零变化路径。
+  注：守方登场淡入起点（impact-90）晚于 hit 帧 crossfade 起点（impact-125），
+  即守方可见的第一帧已是 idle→hit 渐混——这是 125ms crossfade 的固有性质，
+  实测截图确认观感是"滑入同时受击接手"，无硬切感。
+- `evidence/fday14_posebridge_fight/`（capture_fight.js posebridge 模式）：
+  hit/kill 各 6-7 帧目验——萧峰 IDLE/STRIKE 姿势图就位、辽兵（无立绘）sprite
+  正确回退、击破定格姿势停住。
