@@ -459,6 +459,24 @@ function drawPuppet(im, x, y, h, mirror, alpha, pose) {
 // easeOutBack: 收招过冲回弹(机战式挥空后回位)
 function easeOutBack(t) { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); }
 
+// ============ P1-14 B方案挂接钩子: 可插拔姿势渲染器(poseanim.js 接线口, 默认 drawPuppet 零行为变化) ============
+// 用法: poseanim 播放器在 window 上注册 window.POSE_RENDERERS = { att: fn, def: fn };
+// drawCombatant 检测到对应 slot 的渲染器就改调 fn(ctx, {img,x,y,h,mirror,alpha,pose,phase}),
+// 否则逐字节走原 drawPuppet 路径。不改 FT 时间轴/相机/特效, 不注册时渲染结果与原实现完全一致。
+// phase=三镜阶段名: 攻方 'windup'(镜1 起手, enter/windup 同归) / 'strike'(镜2 攻击) / 'impact'(镜3 命中后收势) / 'out'(退场);
+//               守方登场起恒为 'impact'(受击/退场都在镜3)。
+function fightAttPhase(p, tStrike, tImpact) {
+  if (p < tStrike) return 'windup';  // 镜1: 起手 pose 定格段
+  if (p < tImpact) return 'strike';  // 镜2: 出招段
+  if (p < FT.out) return 'impact';   // 镜3: 命中后收势段
+  return 'out';
+}
+function drawCombatant(slot, img, x, y, h, mirror, alpha, pose, phase) {
+  const r = (typeof window !== 'undefined' && window.POSE_RENDERERS) ? window.POSE_RENDERERS[slot] : null;
+  if (r) { r(ctx, { img, x, y, h, mirror, alpha, pose, phase }); return; }
+  drawPuppet(img, x, y, h, mirror, alpha, pose);
+}
+
 // ============ P1-12: 每招式差异化动作编排(丁工 10-23 点名"每一种招式动作是不一样的") ============
 // 基础时间轴: charge=蓄力进度, snap=快起前送→easeOutBack 带回冲归位; 各招式函数自取所需窗口。
 // 设计原则(苛刻老玩家): 身体先于特效说话——直拳小快灵/横扫扭腰抡臂/降龙沉身推掌/
@@ -1540,7 +1558,7 @@ function drawFightScene(nowReal) {
       drawPuppet(FIGHT.defImg, defX + defShakeX * 0.4, defY, defH, true, 0.22 * outA * defAlpha, defPose);
       drawPuppet(FIGHT.defImg, defX + defShakeX * 0.7, defY, defH, true, 0.12 * outA * defAlpha, defPose);
     }
-    drawPuppet(FIGHT.defImg, defX + defShakeX, defY, defH, true, outA * defAlpha, defPose);
+    drawCombatant('def', FIGHT.defImg, defX + defShakeX, defY, defH, true, outA * defAlpha, defPose, 'impact'); // P1-14 钩子: 守方登场起 phase 恒 'impact'
     // crit 双影(更强打击感)
     if (!FIGHT.isMiss && crit && hitP > 0.05 && hitP < 0.85)
       drawPuppet(FIGHT.defImg, defX + defShakeX - 16 * recoil, defY + 5, defH, true, 0.30 * (1 - hitP) * outA * defAlpha, defPose);
@@ -1579,7 +1597,7 @@ function drawFightScene(nowReal) {
     const relayLunge = win(p, tStrike + 30, tStrike + 170) * (1 - win(p, tStrike + 170, tStrike + 420)) * 46;
     drawPuppet(FIGHT.partnerImg, partnerX + relayLunge, partnerY, partnerH, false, outA, pPose);
   }
-  drawPuppet(FIGHT.attImg, attX + attDX + attLunge, attY, attH, false, outA, attPose);
+  drawCombatant('att', FIGHT.attImg, attX + attDX + attLunge, attY, attH, false, outA, attPose, fightAttPhase(p, tStrike, tImpact)); // P1-14 钩子: phase 按三镜时间轴映射
   // P1-12: 瞬步突刺/快拳/双斩的攻方残影 — 身体"动出来"的速度感(身后两层渐淡)
   if (!FIGHT.isMiss && (FIGHT.animKind === 'stab' || FIGHT.animKind === 'dash' || FIGHT.animKind === 'slashx')) {
     const gp = win(p, tStrike - 60, tStrike + 240) * (1 - win(p, tStrike + 240, tStrike + 540));
