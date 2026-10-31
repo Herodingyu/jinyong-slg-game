@@ -28,7 +28,9 @@
   }
   function poseImg(ps, pose) {
     const s = ps && ps.poses && ps.poses[pose];
-    return (s && s.ok && s.img) ? s.img : null;
+    // 占位灰模(poses_placeholder)只供 pose_demo/QA 目验，不进正式战斗——
+    // 玩家验收铁律：灰模木偶比真立绘木偶更出戏，宁可回退立绘 puppet 演出
+    return (s && s.ok && s.img && s.from && s.from.indexOf('poses_placeholder') < 0) ? s.img : null;
   }
   KNOWN_PORTRAITS.forEach(setFor); // 预载（不 await；settle 前渲染走 puppet 回退，settle 后自动接上）
 
@@ -55,8 +57,8 @@
     let att = null;
     if (FIGHT.attIsPortrait) {
       const ps = setFor(ev.att.sprite);
-      if (ps && ps.usable()) {
-        const id = poseImg(ps, 'idle') || poseImg(ps, 'ready');
+      const id = ps ? (poseImg(ps, 'idle') || poseImg(ps, 'ready')) : null;
+      if (id) {
         const im = poseImg(ps, 'strike') || poseImg(ps, 'hit') || id;
         att = new PosePlayer([
           { img: id, tStart: 0,        tEnd: FT.enter,  rot: -4, scale: 0.98 },
@@ -75,8 +77,8 @@
     let def = null;
     if (FIGHT.defIsPortrait && !FIGHT.isMiss) {
       const ps = setFor(ev.def.sprite);
-      if (ps && ps.usable()) {
-        const id = poseImg(ps, 'idle');
+      const id = ps ? poseImg(ps, 'idle') : null;
+      if (id) {
         const ih = poseImg(ps, 'hit') || poseImg(ps, 'strike') || id;
         def = new PosePlayer([
           { img: id, tStart: 0,        tEnd: tI - 60 },
@@ -112,4 +114,6 @@
   }
 
   window.POSE_RENDERERS = { att: render('att'), def: render('def') };
+  // 开发/测试自省句柄：test_pose_bridge F 例程用它模拟"姿势图仅有占位灰模"场景
+  window.POSE_BRIDGE = { sets: sets };
 })();

@@ -72,6 +72,17 @@ assert(true, 'D: 击破定格窗逐帧无异常');
 frameAt(3300); // 冻结内(p 被 frozenP 钉在 3160)
 assert(drew('guojing_hit.png'), 'D: 定格期守方停在 hit 峰值帧');
 
+// ---- F) 占位灰模 gate: 正式战斗绝不使用 poses_placeholder(那是 pose_demo/QA 专用) ----
+// 玩家验收铁律(丁工 10-31): 灰模木偶比真立绘木偶更出戏——宁可回退立绘 puppet 演出
+window.POSE_BRIDGE.sets.guojing.poses.idle.from = 'assets/portraits/poses_placeholder/guojing_idle.png';
+window.POSE_BRIDGE.sets.guojing.poses.hit.from = 'assets/portraits/poses_placeholder/guojing_hit.png';
+restart(mkEv({ isCrit: true })); // 新签名强制重建帧表
+frameAt(2950);
+assert(!drew('guojing_hit.png'), 'F: 占位灰模不进正式战斗(守方 hit 不接)');
+assert(drew('assets/portraits/guojing.png'), 'F: 姿势图仅占位时守方回退真立绘 puppet');
+window.POSE_BRIDGE.sets.guojing.poses.idle.from = 'assets/portraits/poses/guojing_idle.png';
+window.POSE_BRIDGE.sets.guojing.poses.hit.from = 'assets/portraits/poses/guojing_hit.png';
+
 // ---- E) 钩子拔除 = 零变化路径: POSE_RENDERERS 置空后逐字节走 drawPuppet ----
 const saved = window.POSE_RENDERERS;
 window.POSE_RENDERERS = undefined;

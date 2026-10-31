@@ -125,3 +125,7 @@
 - **#42 P1 大立绘 charge 光球锚点偏脸侧（记账打磨，不阻塞）**：萧峰 portrait 宽 338px，poseAttDash/Bullet 的 charge 光球锚 `attW*0.88`≈脸侧，镜1 蓄力定格时光球贴脸，"拳端凝气"的语义读不出。六脉 beam（指尖 gunX/gunY）与 slashx（气劲）无此问题。修法同 #41 思路：dash/bullet 光球锚点改到手/枪口前缘。P1-12 遗留（当时无镜1 特写所以不显眼），三镜特写下暴露。
 - **#43 P1 bullet（火枪）镜2 出招不可读（P1-14 复验新发现，返工）**：三镜钉帧复验（2330/2400/2550 三帧）确认：枪口星形焰窗口 strikeP<0.22≈140ms 且 alpha 峰值 0.65 体量小，弹丸仅 5px 白点+逐段 0.82 衰减拖尾，动/静画面均读不出"开了一枪"。修法定特效窗口（枪口焰拉长到 strikeP<0.45+弹丸放大/拖尾加亮），须动 drawWeaponFx bullet 分支——超出 pose 幅度授权，留 bullet/smash 特效返工日一并做。证据 evidence/fday14_accept/bullet_x2550.jpg。
 - **#44 P1 smash（铁杖）镜2 无挥杖特效（P1-14 复验新发现，返工）**：镜1 抡杖上挺 pose 好，但镜2 全程无挥杖轨迹 FX（2330/2400 近空镜），八颗碎石迸起窗口短、2900/3100 帧均不可见，命中感全靠镜3 伤害数字。修法：drawWeaponFx smash 分支加挥杖弧光+碎石窗口拉长，同样须动特效逻辑，与 #43 同日返工。证据 evidence/fday14_accept/smash_x2900.jpg。
+
+## 追加记录（2026-10-31 下午，丁工"人物根本动作就不会动"打回 → 热修）
+
+- **#45 P1-15 占位灰模进正式战斗=人物不会动（已修，本 commit）**：丁工 16:16 打回"战斗画面…人物根本动作就不会动"。诊断：姿势帧系统的三级回退把 4 张灰模占位图（素材线降级交付物）接进了正式战斗，萧峰从真立绘降级成灰模火柴人，两帧静图 crossfade 读不出动作，且与守方真立绘（段延庆级原画）同框画风炸裂。修：①pose_bridge 的 poseImg 只认 `poses/` 真图，`poses_placeholder` 一律视为缺图回退立绘 puppet（占位图仅 pose_demo/QA 可用）；②演出技法补"动"感——全招式突进（近战 0.22CW/远程 0.10CW，原仅 dash/stab 有）、全招式残影（近战双层/远程单层，原仅 stab/dash/slashx）、命中急停微回弹（attRecoilX 34px/90ms）、出招速度线 10 道白梭（[tStrike-120,+420] 窗）。验证：test_fx_b1 17/17 + test_pose_bridge 21 断言全过（新增 F 例程锁占位 gate）；evidence/motion_xianglong / motion_liuzmai flipbook 目验（萧峰真立绘+金龙/剑气，双向同画风）。注：速度线在 dragon 类大特效下被 FX 遮盖，属正常层次；轻特效武器（拳/指）读得出。AI 姿势图（4 真图）到位后姿势帧自动接管，零代码。

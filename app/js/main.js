@@ -1520,12 +1520,16 @@ function drawFightScene(nowReal) {
   if (FIGHT.isMiss) defShakeX = -recoil * 90; // 守方向右后方闪避(面向左,身后=+x取负避开)
   else defShakeX = recoil * (16 + (crit ? 10 : 0)) * (0.55 + Math.random() * 0.45);
   // 突进类位移(整体位移保留, 但不再是唯一动作——身体姿态由 puppet 层表达)
+  // P1-15: 全招式突进——近战(dash/stab/sweep/dragon/smash/slashx)全幅 0.22CW，
+  // 远程(beam/bullet/wave)半幅 0.10CW：原地发招也要有前冲的决意，人物才"动"得起来
   let attLunge = 0, attLeapY = 0;
   const sp2 = win(p, tStrike - 70, tStrike + 140);
-  if (FIGHT.animKind === 'dash' || FIGHT.animKind === 'stab')
-    attLunge = Math.sin(Math.min(1, sp2) * Math.PI) * (CW * 0.22);
+  const MELEE_KINDS = { dash: 1, stab: 1, sweep: 1, dragon: 1, smash: 1, slashx: 1 };
   if (FIGHT.animKind === 'smash') // 跃起下砸
     attLeapY = -Math.sin(Math.min(1, sp2) * Math.PI) * 130;
+  attLunge = Math.sin(Math.min(1, sp2) * Math.PI) * (MELEE_KINDS[FIGHT.animKind] ? CW * 0.22 : CW * 0.10);
+  // P1-15: 命中急停——出招冲程在命中锚被"刹住"并微回弹(机战击打帧顿挫感)
+  const attRecoilX = -34 * win(p, tImpact, tImpact + 90) * (1 - win(p, tImpact + 90, tImpact + 320));
   // P1-9: 双方 puppet 姿态(像素小人走整图变换: 64px 源图切三层会裂)
   const attPose = fightAttPose(p, now, tStrike);
   attPose.whole = !FIGHT.attIsPortrait;
@@ -1597,13 +1601,32 @@ function drawFightScene(nowReal) {
     const relayLunge = win(p, tStrike + 30, tStrike + 170) * (1 - win(p, tStrike + 170, tStrike + 420)) * 46;
     drawPuppet(FIGHT.partnerImg, partnerX + relayLunge, partnerY, partnerH, false, outA, pPose);
   }
-  drawCombatant('att', FIGHT.attImg, attX + attDX + attLunge, attY, attH, false, outA, attPose, fightAttPhase(p, tStrike, tImpact), p); // P1-14 钩子: phase 按三镜时间轴映射; p 供姿势帧时间轴(pose_bridge)
-  // P1-12: 瞬步突刺/快拳/双斩的攻方残影 — 身体"动出来"的速度感(身后两层渐淡)
-  if (!FIGHT.isMiss && (FIGHT.animKind === 'stab' || FIGHT.animKind === 'dash' || FIGHT.animKind === 'slashx')) {
+  // P1-15: 出招速度线(镜2 出招窗 攻方→守方放射白梭, 每帧微抖=闪烁速度感)——PSP机战签名元素
+  const slP = win(p, tStrike - 120, tStrike + 30) * (1 - win(p, tStrike + 150, tStrike + 420));
+  if (slP > 0.02 && !FIGHT.isMiss && defAlpha > 0.01) {
+    const attCx = attX + attDX + attLunge + attW0 * 0.5, attCy = attY + attH * 0.45;
+    const dirX = (defX + defW0 * 0.5) - attCx || 1;
+    const nx = Math.sign(dirX);
+    ctx.save();
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 10; i++) {
+      const spread = (i - 4.5) * attH * 0.09 + (Math.random() - 0.5) * 14;
+      const len = attW0 * (0.9 + Math.random() * 0.9);
+      const sx = attCx - nx * 70, sy = attCy + spread;
+      ctx.globalAlpha = (0.25 + Math.random() * 0.45) * slP * outA;
+      ctx.strokeStyle = '#ffffff';
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx - nx * len, sy + spread * 0.10); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  drawCombatant('att', FIGHT.attImg, attX + attDX + attLunge + attRecoilX, attY, attH, false, outA, attPose, fightAttPhase(p, tStrike, tImpact), p); // P1-14 钩子: phase 按三镜时间轴映射; p 供姿势帧时间轴(pose_bridge)
+  // P1-15: 全招式残影(近战双层/远程单层)——"动出来"的速度感不再只属于突刺类;
+  // 横扫(sweep)单层(双层残影会跟武器弧光打架)
+  if (!FIGHT.isMiss) {
     const gp = win(p, tStrike - 60, tStrike + 240) * (1 - win(p, tStrike + 240, tStrike + 540));
     if (gp > 0.02) {
       drawPuppet(FIGHT.attImg, attX + attDX + attLunge - 46 * gp, attY + 4, attH, false, 0.20 * gp * outA, attPose);
-      if (FIGHT.animKind === 'stab') // 突刺最凶, 双层残影
+      if (MELEE_KINDS[FIGHT.animKind] && FIGHT.animKind !== 'sweep')
         drawPuppet(FIGHT.attImg, attX + attDX + attLunge - 92 * gp, attY + 8, attH, false, 0.10 * gp * outA, attPose);
     }
   }
