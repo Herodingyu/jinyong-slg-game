@@ -1577,25 +1577,25 @@ function drawFightScene(nowReal) {
     (FIGHT.attIsPortrait ? 150 : 190) * (0.7 + 0.3 * attScale), 14, 0, 0, Math.PI * 2); ctx.fill();
   if (defAlpha > 0.01) {
     if (FIGHT.isMiss && hitP > 0 && hitP < 1) {
-      drawPuppet(FIGHT.defImg, defX + defShakeX * 0.4, defY, defH, true, 0.22 * outA * defAlpha, defPose);
-      drawPuppet(FIGHT.defImg, defX + defShakeX * 0.7, defY, defH, true, 0.12 * outA * defAlpha, defPose);
+      drawCombatant('def', FIGHT.defImg, defX + defShakeX * 0.4, defY, defH, true, 0.22 * outA * defAlpha, defPose, 'impact', p);
+      drawCombatant('def', FIGHT.defImg, defX + defShakeX * 0.7, defY, defH, true, 0.12 * outA * defAlpha, defPose, 'impact', p);
     }
     drawCombatant('def', FIGHT.defImg, defX + defShakeX, defY, defH, true, outA * defAlpha, defPose, 'impact', p); // P1-14 钩子: 守方登场起 phase 恒 'impact'; p 供姿势帧时间轴(pose_bridge)
     // crit 双影(更强打击感)
     if (!FIGHT.isMiss && crit && hitP > 0.05 && hitP < 0.85)
-      drawPuppet(FIGHT.defImg, defX + defShakeX - 16 * recoil, defY + 5, defH, true, 0.30 * (1 - hitP) * outA * defAlpha, defPose);
+      drawCombatant('def', FIGHT.defImg, defX + defShakeX - 16 * recoil, defY + 5, defH, true, 0.30 * (1 - hitP) * outA * defAlpha, defPose, 'impact', p);
     // 受击白闪(落空无; crit 加强): 白色剪影压人
     if (!FIGHT.isMiss && hitP > 0 && hitP < 0.5) {
       const fa = Math.min(1, (0.5 - hitP) * (crit ? 2.4 : 1.5)) * outA * defAlpha;
       if ('filter' in ctx) {
         ctx.save();
         ctx.filter = 'brightness(0) invert(1)';
-        drawPuppet(FIGHT.defImg, defX + defShakeX, defY, defH, true, fa * 0.75, defPose);
+        drawCombatant('def', FIGHT.defImg, defX + defShakeX, defY, defH, true, fa * 0.75, defPose, 'impact', p);
         ctx.restore();
       } else {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        drawPuppet(FIGHT.defImg, defX + defShakeX, defY, defH, true, fa * 0.4, defPose);
+        drawCombatant('def', FIGHT.defImg, defX + defShakeX, defY, defH, true, fa * 0.4, defPose, 'impact', p);
         ctx.restore();
       }
     }
@@ -1617,7 +1617,7 @@ function drawFightScene(nowReal) {
     pPose.whole = !FIGHT.partnerIsPortrait;
     // 接力突进: 搭档在主攻命中后向前扑出一段(静止帧也要读得出"接力"), 随回弹归位
     const relayLunge = win(p, tStrike + 30, tStrike + 170) * (1 - win(p, tStrike + 170, tStrike + 420)) * 46;
-    drawPuppet(FIGHT.partnerImg, partnerX + relayLunge, partnerY, partnerH, false, outA, pPose);
+    drawCombatant('att', FIGHT.partnerImg, partnerX + relayLunge, partnerY, partnerH, false, outA, pPose, 'strike', p);
   }
   // P1-15: 出招速度线(镜2 出招窗 攻方→守方放射白梭, 每帧微抖=闪烁速度感)——PSP机战签名元素
   const slP = win(p, tStrike - 120, tStrike + 30) * (1 - win(p, tStrike + 150, tStrike + 420));
@@ -1643,9 +1643,9 @@ function drawFightScene(nowReal) {
   if (!FIGHT.isMiss) {
     const gp = win(p, tStrike - 60, tStrike + 240) * (1 - win(p, tStrike + 240, tStrike + 540));
     if (gp > 0.02) {
-      drawPuppet(FIGHT.attImg, attX + attDX + attLunge - 46 * gp, attY + 4, attH, false, 0.20 * gp * outA, attPose);
+      drawCombatant('att', FIGHT.attImg, attX + attDX + attLunge - 46 * gp, attY + 4, attH, false, 0.20 * gp * outA, attPose, 'strike', p);
       if (MELEE_KINDS[FIGHT.animKind] && FIGHT.animKind !== 'sweep')
-        drawPuppet(FIGHT.attImg, attX + attDX + attLunge - 92 * gp, attY + 8, attH, false, 0.10 * gp * outA, attPose);
+        drawCombatant('att', FIGHT.attImg, attX + attDX + attLunge - 92 * gp, attY + 8, attH, false, 0.10 * gp * outA, attPose, 'strike', p);
     }
   }
 

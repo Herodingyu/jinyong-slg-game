@@ -98,7 +98,11 @@
   // opts 语义与 drawPuppet 对齐：img/x/y/h/mirror/alpha/pose 原样透传（p 由 main.js 钩子补传）。
   function render(slot) {
     return function (ctx, o) {
-      const puppet = function () { drawPuppet(o.img, o.x, o.y, o.h, o.mirror, o.alpha, o.pose); };
+      // 回退链三级: 真 AI 姿势图 > 水墨关节人(四肢动画, P1-16) > 立绘 puppet 整图变换
+      const puppet = function () {
+        if (typeof InkPuppet !== 'undefined' && InkPuppet.drawCombatant) { InkPuppet.drawCombatant(ctx, o); return; }
+        drawPuppet(o.img, o.x, o.y, o.h, o.mirror, o.alpha, o.pose);
+      };
       const c = ensure();
       if (!c) { puppet(); return; }
       const pl = c[slot];
