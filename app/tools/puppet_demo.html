@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>水墨关节人 · 四肢动作样片 v2</title>
+<style>
+  body { margin:0; background:#0b0e1a; color:#cfd3e0; font:14px/1.5 monospace; }
+  #wrap { display:flex; gap:12px; padding:12px; }
+  canvas { background:#11142a; border:1px solid #2a2f4a; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv" width="920" height="560"></canvas>
+</div>
+<script>
+// ============ 水墨关节人 v2: 程序骨架四肢动画样片 (2026-11-01) ============
+// 远侧四肢→躯干→近侧四肢 三层压叠; 墨线描边+宣纸白; 发髻飘带+红腰带(萧峰意象)。
+// 时间轴确定性: window.seek(t) 钉帧。待机→蓄力扭身拉臂→上步推掌(掌水平前送)→收势。
+'use strict';
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+
+// [t, 关节角deg]: aN颈 aL/aR肩 aLE/aRE肘 aT躯干倾 tw躯干扭 hipL/R髋摆 knL/R膝弯 rootY升降 rootX位移
+const FRAMES = [
+  [0,    { aN:0,  aL:10, aR:-10, aLE:16, aRE:-16, aT:0,  tw:0,   hipL:-2, hipR:2,  knL:5,  knR:5,  rootY:0,  rootX:0 }],
+  [700,  { aN:6,  aL:14, aR:-34, aLE:22, aRE:-78, aT:5,  tw:15,  hipL:-7, hipR:7,  knL:13, knR:11, rootY:7,  rootX:0 }],
+  [1250, { aN:10, aL:52, aR:-32, aLE:18, aRE:-60, aT:9,  tw:12,  hipL:-11,hipR:11, knL:20, knR:18, rootY:14, rootX:0 }],
+  [1450, { aN:10, aL:56, aR:-36, aLE:20, aRE:-66, aT:10, tw:14,  hipL:-12,hipR:12, knL:22, knR:20, rootY:16, rootX:0 }],
+  [1560, { aN:-6, aL:-8, aR:96,  aLE:6,  aRE:-6,  aT:-5, tw:-20, hipL:9,  hipR:-15,knL:5,  knR:28, rootY:-8, rootX:26 }],
+  [1680, { aN:-6, aL:-8, aR:100, aLE:4,  aRE:-4,  aT:-6, tw:-22, hipL:10, hipR:-16,knL:5,  knR:30, rootY:-9, rootX:34 }],
+  [1900, { aN:-2, aL:8,  aR:52,  aLE:10, aRE:-18, aT:-2, tw:-10, hipL:5,  hipR:-7, knL:8,  knR:13, rootY:0,  rootX:30 }],
+  [2300, { aN:0,  aL:10, aR:-10, aLE:16, aRE:-16, aT:0,  tw:0,   hipL:-2, hipR:2,  knL:5,  knR:5,  rootY:0,  rootX:0 }],
+];
+const DUR = 2600;
+function lerpJ(a, b, t) {
+  const o = {};
+  for (const k in a) o[k] = a[k] + (b[k] - a[k]) * t;
+  return o;
+}
+function poseAt(t) {
+  if (t <= 0) return FRAMES[0][1];
+  for (let i = 0; i < FRAMES.length - 1; i++) {
+    const [t0, j0] = FRAMES[i], [t1, j1] = FRAMES[i + 1];
+    if (t >= t0 && t < t1) {
+      let u = (t - t0) / (t1 - t0);
+      u = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+      return lerpJ(j0, j1, u);
+    }
+  }
+  return FRAMES[FRAMES.length - 1][1];
+}
+const rad = d => d * Math.PI / 180;
+
+const INK = 'rgba(20,22,32,0.9)';       // 墨线(描边)
+const PAPER = 'rgba(238,233,220,0.97)'; // 宣纸白(填充)
+function brush(x0, y0, angDeg, len, w) {
+  const a = rad(angDeg);
+  const mx = x0 + Math.sin(a) * len * 0.5, my = y0 - Math.cos(a) * len * 0.5;
+  const x1 = x0 + Math.sin(a) * len, y1 = y0 - Math.cos(a) * len;
+  ctx.strokeStyle = INK; ctx.lineWidth = w + 2.4;
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(mx, my, x1, y1); ctx.stroke();
+  ctx.strokeStyle = PAPER; ctx.lineWidth = w;
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(mx, my, x1, y1); ctx.stroke();
+  return [x1, y1];
+}
+function dot(x, y, r) {
+  ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(x, y, r + 1.6, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = PAPER; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+function drawFigure(px, py, s, J) {
+  ctx.save();
+  ctx.translate(px, py); ctx.scale(s, s);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const rootX = J.rootX, rootY = -J.rootY;
+  const pelvisY = rootY - 74;
+  const chestA = J.aT, tw = J.tw;
+  // 骨架关键点
+  const waistX = rootX + Math.sin(rad(chestA)) * 8;
+  const waistY = pelvisY - 30;
+  const chestX = waistX + Math.sin(rad(chestA)) * 28;
+  const chestY = waistY - Math.cos(rad(chestA)) * 28;
+  const neckX = chestX + Math.sin(rad(chestA + J.aN * 0.4)) * 12;
+  const neckY = chestY - 12;
+  const headX = neckX + Math.sin(rad(chestA + J.aN)) * 10;
+  const headY = neckY - 10;
+  const shL = [chestX - 14 - Math.sin(rad(tw)) * 4, chestY + 3 + Math.abs(Math.sin(rad(tw))) * 2];
+  const shR = [chestX + 14 + Math.sin(rad(tw)) * 4, chestY + 3 + Math.abs(Math.sin(rad(tw))) * 2];
+  const hipL = [rootX - 10, pelvisY + 3], hipR = [rootX + 10, pelvisY + 3];
+
+  const arm = (sh, a1, a2, w) => {
+    const [ex, ey] = brush(sh[0], sh[1], a1, 38, w);
+    const [hx, hy] = brush(ex, ey, a1 + a2, 34, w - 3);
+    dot(hx, hy, 5.2);
+  };
+  const leg = (hp, a1, a2) => {
+    const [kx, ky] = brush(hp[0], hp[1], a1, 52, 12);
+    const [ax, ay] = brush(kx, ky, a1 + a2, 48, 8);
+    ctx.strokeStyle = INK; ctx.lineWidth = 4.5;
+    ctx.beginPath(); ctx.moveTo(ax - 3, ay); ctx.lineTo(ax + 9, ay + 1); ctx.stroke();
+    ctx.strokeStyle = PAPER; ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.moveTo(ax - 3, ay); ctx.lineTo(ax + 8, ay + 1); ctx.stroke();
+  };
+  // 远侧(左)四肢 → 躯干 → 近侧(右)四肢
+  leg(hipL, -3 + J.hipL, J.knL);
+  arm(shL, (J.aL || 0) - tw * 0.5, J.aLE, 9);
+  brush(rootX, pelvisY + 4, chestA * 0.5, 22, 18);            // 胯
+  brush(waistX, waistY + 4, chestA, 30, 15);                  // 腰
+  brush(chestX, chestY + 6, chestA, 24, 16);                  // 胸
+  ctx.strokeStyle = 'rgba(178,34,34,0.95)'; ctx.lineWidth = 4.5; // 红腰带
+  ctx.beginPath(); ctx.moveTo(rootX - 12, pelvisY + 1); ctx.lineTo(rootX + 12, pelvisY - 2); ctx.stroke();
+  dot(headX, headY - 10, 11);                                  // 头
+  dot(headX - 1, headY - 23, 4);                               // 发髻
+  ctx.strokeStyle = PAPER; ctx.lineWidth = 2.4;                // 飘带(随扭动摆动)
+  ctx.beginPath(); ctx.moveTo(headX - 4, headY - 22);
+  ctx.quadraticCurveTo(headX - 15 - tw * 0.4, headY - 16, headX - 22 - tw * 0.9, headY - 2 + tw * 0.25);
+  ctx.stroke();
+  leg(hipR, 3 + J.hipR, J.knR);
+  arm(shR, (J.aR || 0) + tw * 0.5, J.aRE, 10.5);
+  ctx.restore();
+}
+function drawBackdrop() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#101430'); g.addColorStop(1, '#1a1e3d');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(240,240,230,0.9)'; ctx.beginPath(); ctx.arc(790, 90, 34, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(240,240,230,0.15)'; ctx.beginPath(); ctx.arc(790, 90, 52, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#232848'; ctx.fillRect(0, 420, W, 140);
+  ctx.strokeStyle = 'rgba(200,205,220,0.10)'; ctx.lineWidth = 1;
+  for (let i = 0; i < 40; i++) {
+    const x = (i * 97) % W, y = 430 + (i * 53) % 120;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 26, y); ctx.stroke();
+  }
+}
+function drawFx(t) {
+  const winF = (t, a, b) => Math.min(1, Math.max(0, (t - a) / (b - a)));
+  const sl = winF(t, 1480, 1560) * (1 - winF(t, 1700, 1900));
+  if (sl > 0.02) {
+    ctx.save(); ctx.strokeStyle = '#fff';
+    for (let i = 0; i < 12; i++) {
+      const y = 150 + i * 26 + (Math.random() - 0.5) * 12;
+      const x0 = 240 + Math.random() * 120, len = 120 + Math.random() * 160;
+      ctx.globalAlpha = (0.15 + Math.random() * 0.4) * sl; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + len, y - 6); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  const ring = winF(t, 1560, 1620) * (1 - winF(t, 1620, 1850));
+  if (ring > 0.02) {
+    ctx.save(); ctx.strokeStyle = 'rgba(255,225,150,0.9)';
+    ctx.globalAlpha = ring; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(560, 300, 20 + (1 - ring) * 130, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+}
+function seek(t) {
+  ctx.clearRect(0, 0, W, H);
+  drawBackdrop();
+  const J = poseAt(Math.min(t, DUR));
+  drawFx(t);
+  drawFigure(330, 470, 1.35, J);
+  ctx.fillStyle = 'rgba(220,224,235,0.75)'; ctx.font = '13px monospace';
+  ctx.fillText('t=' + String(Math.min(t, DUR)).padStart(4, ' ') + 'ms  水墨关节人 v2 · 四肢独立动作(肩/肘/髋/膝/颈)', 12, 22);
+  return J;
+}
+window.seek = seek;
+const q = new URLSearchParams(location.search);
+if (q.has('t')) { seek(+q.get('t')); } else {
+  const t0 = performance.now();
+  (function loop() { seek((performance.now() - t0) % DUR); requestAnimationFrame(loop); })();
+}
+</script>
+</body>
+</html>
