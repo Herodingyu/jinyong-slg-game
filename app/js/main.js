@@ -412,6 +412,23 @@ function roundRectPath(x, y, w, h, r) {
 // 丁工 10-20 点名"人物不会动": 机战A 是逐帧动作, 零新素材下把立绘按头/躯干/腿三层切分，
 // 每层独立变换逼近"这个人在出招/在挨打"。切分比例做成常量, 个别立绘姿势差异可在此微调。
 const PUPPET = { HEAD: 0.22, TORSO: 0.56 };   // 头占顶22% 躯干占中56% 腿=剩余22%
+// P1-16(AUDIT#41/#42): 蓄力光球/出招特效锚点逐张标定——旧默认锚(attW≈0.64, 0.42H)恰好落在各立绘脸部，
+// 三镜特写下光球糊脸/贴脸，"拳端凝气"的语义读不出。按素材逐图标定"离敌方最近的前手/枪口"(归一化坐标)。
+// 表现层常量表，同 PUPPET 惯例；新增立绘须逐张标定(AUDIT#22 同款约束)。
+const ATT_ANCHOR = {
+  'xiaofeng.png': [0.85, 0.60],  // 萧峰: 右拳(前手拳端；左掌为后手)
+  'xiaobao.png':  [0.87, 0.44],  // 韦小宝: 烟枪口=火枪枪口前缘
+  'duanyu.png':   [0.62, 0.40],  // 段誉: 右手指尖(六脉/一阳指出手点)
+  'duanyq.png':   [0.45, 0.48],  // 段延庆: 前推爪手(一阳指·透骨劲源)
+  'guojing.png':  [0.77, 0.53],  // 郭靖: 前手(右)
+  '':             [0.62, 0.70],  // sprite 默认(像素小人): 双手部中心——脸部在 0.23H，手在 0.70H
+};
+// 攻方出手锚点: 立绘按文件名查表(未标定的新立绘回退右拳前缘)，sprite 一律双手部
+function attAnchorOf(img, isPortrait) {
+  if (!isPortrait) return ATT_ANCHOR[''];
+  const src = (img && img.src || '').split('/').pop();
+  return ATT_ANCHOR[src] || ATT_ANCHOR['xiaofeng.png'];
+}
 // puppet 姿态: lean=躯干前倾角(+, 顶向画面右) squash=Y缩放(1=常态) headLean/headDX/headDY=头部附加
 //             legDX/legDY/legLean=腿部附加(后蹬/屈膝)
 // pose.whole=true 时整图变换(供 64px 像素小人用: 其头切片仅14px且盔缨留白大, 硬切三层会裂)，
@@ -1632,10 +1649,11 @@ function drawFightScene(nowReal) {
     }
   }
 
-  // --- 蓄力光球(攻方右前方=出手点; chargeP=蓄力进度驱动光球聚合; P1-14: 镜1内蓄满定格) ---
+  // --- 蓄力光球(攻方"出手点"=前手/枪口; P1-16 AUDIT#41/#42 逐张标定锚点, 不再用固定偏移) ---
   const chargeP = win(p, FT.enter, FT_READY);
-  let gunX = attX + attDX + attLunge + (FIGHT.attIsPortrait ? 300 : 250);
-  let gunY = attY + attH * 0.42;
+  const anch = attAnchorOf(FIGHT.attImg, FIGHT.attIsPortrait);
+  let gunX = attX + attDX + attLunge + attW0 * anch[0];
+  let gunY = attY + attH * anch[1];
   if (FIGHT.comboPartner) {
     // 合体技: 光球在双立绘手部之间聚合(两人内力合流, 再一道发出)
     const pHandX = partnerX + (FIGHT.partnerIsPortrait ? 250 : 210);
@@ -1922,18 +1940,20 @@ function drawWeaponFx(t, p, now, gx, gy, tx, ty, attX, attY, attH) {
       }
       break;
     }
-    case 'bullet': { // 弹丸+拖尾+枪口焰+硝烟(枪感三件套)
-      if (t < 0.22) { // 枪口星形焰(击发瞬间)
-        const mf = 1 - t / 0.22;
-        ctx.globalAlpha = mf;
+    case 'bullet': { // 弹丸+拖尾+枪口焰+硝烟(枪感三件套; P1-16 AUDIT#43: 枪口焰拉长+弹丸放大加亮——"开了一枪"必须读得出)
+      if (t < 0.45) { // 枪口星形焰(击发窗拉长到 t<0.45≈280ms, 峰值在早期)
+        const mf = 1 - t / 0.45;
+        ctx.globalAlpha = Math.min(1, mf * 1.7);
         ctx.fillStyle = '#fff2c0';
-        const mr2 = 8 + mf * 14;
+        const mr2 = 12 + mf * 22;
         ctx.beginPath();
         for (let k = 0; k < 8; k++) {
           const a = k * Math.PI / 4, rr2 = k % 2 ? mr2 * 0.45 : mr2;
           ctx.lineTo(gx + Math.cos(a) * rr2, gy + Math.sin(a) * rr2);
         }
         ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.globalAlpha = mf * 0.8;
+        ctx.beginPath(); ctx.arc(gx, gy, mr2 * 0.6, 0, Math.PI * 2); ctx.stroke();
       }
       for (let i = 0; i < 3; i++) { // 硝烟团: 三团缓升确定性飘移
         const sp = win(t, 0.06 + i * 0.1, 0.75 + i * 0.08);
@@ -1945,14 +1965,20 @@ function drawWeaponFx(t, p, now, gx, gy, tx, ty, attX, attY, attH) {
         ctx.fill();
       }
       const px = gx + ux * len * t, py = gy + uy * len * t;
-      for (let i = 1; i <= 6; i++) {
-        ctx.globalAlpha *= 0.82;
-        ctx.fillStyle = c;
-        ctx.beginPath(); ctx.arc(px - ux * i * 9, py - uy * i * 9, 4 - i * 0.5, 0, Math.PI * 2); ctx.fill();
+      // 弹丸光晕(角色色, 半径16——不再是 5px 白点)
+      const pg = ctx.createRadialGradient(px, py, 0, px, py, 16);
+      pg.addColorStop(0, '#ffffff'); pg.addColorStop(0.35, c); pg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = Math.min(1, t * 6);
+      ctx.fillStyle = pg;
+      ctx.beginPath(); ctx.arc(px, py, 16, 0, Math.PI * 2); ctx.fill();
+      for (let i = 1; i <= 6; i++) { // 拖尾: 间距加大/前两节纯白/衰减放缓=弹道读得出
+        ctx.globalAlpha *= 0.86;
+        ctx.fillStyle = i < 3 ? '#ffffff' : c;
+        ctx.beginPath(); ctx.arc(px - ux * i * 11, py - uy * i * 11, 6 - i * 0.7, 0, Math.PI * 2); ctx.fill();
       }
       ctx.globalAlpha = 1;
       ctx.fillStyle = '#fff';
-      ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI * 2); ctx.fill();
       break;
     }
     case 'dragon': { // 龙形气劲: 曲线蛇行+龙头光球+鳞片光点 + 命中地面掌风涟漪
@@ -2076,7 +2102,38 @@ function drawWeaponFx(t, p, now, gx, gy, tx, ty, attX, attY, attH) {
       }
       break;
     }
-    case 'smash': { // 下砸: 落点冲击环+地裂纹 + 碎石迸起(确定性抛物线)
+    case 'smash': { // 下砸: 挥杖弧光(AUDIT#44 镜2主体特效) + 落点冲击环+地裂纹 + 碎石迸起(窗口拉长)
+      // 挥杖轨迹(AUDIT#44): 抡起(身后下方)→过头(前上方)→砸落守方, 二次贝塞尔采样折线;
+      // 曲线恒在控制点凸包内=任意时刻已扫段都在画面内; 杖头彗星引领动点; 命中后淡出
+      const Wx = gx - 200, Wy = gy + 60;               // 抡起位: 身后下方(蓄力回摆)
+      const Cx2 = gx + 40, Cy2 = gy - 240;             // 控制点: 头前上方(杖过头)
+      const bpt = tt => [
+        (1 - tt) * (1 - tt) * Wx + 2 * (1 - tt) * tt * Cx2 + tt * tt * tx,
+        (1 - tt) * (1 - tt) * Wy + 2 * (1 - tt) * tt * Cy2 + tt * tt * ty,
+      ];
+      const sw = Math.min(1, t / 0.45);
+      const arcFade = 1 - win(t, 0.82, 1.0);
+      const NPT = 24;
+      let hx = Wx, hy = Wy;
+      for (let i = 1; i <= NPT; i++) {
+        const t0 = (i - 1) / NPT, t1 = i / NPT;
+        if (t1 > sw) { const u = (sw - t0) * NPT; const p0 = bpt(t0); hx = p0[0] + (bpt(t1)[0] - p0[0]) * u; hy = p0[1] + (bpt(t1)[1] - p0[1]) * u; break; }
+        const p0 = bpt(t0), p1 = bpt(t1);
+        hx = p1[0]; hy = p1[1];
+        const nearHead = t1 > sw - 0.14;
+        ctx.strokeStyle = nearHead ? '#ffffff' : c;
+        ctx.lineWidth = (nearHead ? 13 : 10) * (1 - t1 * 0.3);
+        ctx.globalAlpha = Math.min(1, t * 5) * arcFade * (1 - t1 * 0.35);
+        ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.stroke();
+      }
+      { // 杖头彗星光球: 挥击的"动点", 眼睛跟得住杖往哪挥
+        const hg = ctx.createRadialGradient(hx, hy, 0, hx, hy, 26);
+        hg.addColorStop(0, '#ffffff'); hg.addColorStop(0.4, c); hg.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.globalAlpha = Math.min(1, t * 5) * arcFade;
+        ctx.fillStyle = hg;
+        ctx.beginPath(); ctx.arc(hx, hy, 26, 0, Math.PI * 2); ctx.fill();
+      }
       const drop = Math.min(1, t * 1.3);
       const rr = drop * 120;
       ctx.strokeStyle = c; ctx.lineWidth = 8 * (1 - drop) + 2;
@@ -2091,16 +2148,16 @@ function drawWeaponFx(t, p, now, gx, gy, tx, ty, attX, attY, attH) {
         ctx.lineTo(tx + Math.cos(a) * rr * 0.9, ty + 40 + Math.sin(a) * rr * 0.32);
         ctx.stroke();
       }
-      if (t > 0.15) { // 碎石: 八颗按各自相位抛出再落回(雪地下砸的实体感)
+      if (t > 0.15) { // 碎石: 八颗按各自相位抛出再落回(窗口拉长到 t→1.0, 重力放缓=滞空更久, 体量加大)
         for (let i = 0; i < 8; i++) {
           const seed = i * 2.4;
-          const dp = win(t, 0.15 + (i % 3) * 0.04, 0.92);
+          const dp = win(t, 0.15 + (i % 3) * 0.04, 1.0);
           if (dp <= 0) continue;
-          const vx = Math.sin(seed) * 70, vy0 = 100 + (i % 4) * 35;
-          const px = tx + vx * dp, py = ty + 40 - vy0 * dp + 260 * dp * dp;
-          ctx.globalAlpha = (1 - dp) * 0.9;
-          ctx.fillStyle = i % 2 ? '#8a8a96' : c;
-          ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fill();
+          const vx = Math.sin(seed) * 80, vy0 = 110 + (i % 4) * 38;
+          const px = tx + vx * dp, py = ty + 40 - vy0 * dp + 190 * dp * dp;
+          ctx.globalAlpha = (1 - dp) * 0.95;
+          ctx.fillStyle = i % 2 ? '#9a9aa6' : c;
+          ctx.beginPath(); ctx.arc(px, py, 4.5, 0, Math.PI * 2); ctx.fill();
         }
       }
       break;
